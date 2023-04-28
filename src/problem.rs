@@ -45,7 +45,8 @@ pub struct State {
 struct Buffer {
     other_vortices: Vec<PointVortex>,
     ks: [Vec<Vector>; 4],
-    pv_yns: [Vec<PointVortex>; 4]
+    pv_yns: [Vec<PointVortex>; 4],
+    _yns: Vec<PointVortex>
 }
 
 pub struct Solver {
@@ -79,7 +80,8 @@ impl Solver {
             pv_yns: [vec![PointVortex::default(); n],
                      vec![PointVortex::default(); n],
                      vec![PointVortex::default(); n],
-                     vec![PointVortex::default(); n]]
+                     vec![PointVortex::default(); n]],
+            _yns: vec![PointVortex::default(); n]
         };
         Solver { rossby, sqg, dt, state, threads, buffer }
     }
@@ -93,16 +95,17 @@ impl Solver {
                                           .zip(self.buffer.pv_yns.iter_mut())
                                           .zip([0.5, 0.5, 1.0, 1.0])
                                           .map(|((a, b), c)| (a, b, c)) {
+            self.buffer._yns.copy_from_slice(&yns);
             for (j, yn, &PointVortex { position: y0, .. }, k) in yns.iter_mut()
                                                                     .enumerate()
                                                                     .zip(self.state.point_vortices.iter())
                                                                     .zip(ks.iter_mut())
                                                                     .map(|(((a, b), c), d)| (a, b, c, d)) {
-                for (&pv, opv) in self.state.point_vortices.iter()
-                                                       .enumerate()
-                                                       .filter(|&(k, _)| j != k)
-                                                       .map(|(_, x)| x)
-                                                       .zip(self.buffer.other_vortices.iter_mut()) {
+                for (&pv, opv) in self.buffer._yns.iter()
+                                     .enumerate()
+                                     .filter(|&(k, _)| j != k)
+                                     .map(|(_, x)| x)
+                                     .zip(self.buffer.other_vortices.iter_mut()) {
                     *opv = pv;
                 }
                 *k = ui(y0, &self.buffer.other_vortices, self.rossby, self.sqg);
@@ -114,7 +117,7 @@ impl Solver {
             let k2 = ui(*y0, &self.buffer.pv_yns[0], self.rossby, self.sqg);
             let k3 = ui(*y0, &self.buffer.pv_yns[1], self.rossby, self.sqg);
             let k4 = ui(*y0, &self.buffer.pv_yns[2], self.rossby, self.sqg);
-            *y0 = *y0 + 1. / 6. * self.dt * (k1 + 2. * k2 + 2. * k3 + k4)
+            *y0 = *y0 + self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4)
         };
         match self.threads {
             Some(_) => self.state.passive_tracers.par_iter_mut().for_each(update),
@@ -126,8 +129,8 @@ impl Solver {
                                                                  .zip(self.buffer.ks[2].iter())
                                                                  .zip(self.buffer.ks[3].iter())
                                                                  .map(|((((a, b), c), d), e)| (a, b, c, d, e)) {
-            let position = y0.position + 1./ 6. * self.dt * (k1 + 2. * k2 + 2. * k3 + k4);
-            *y0 = PointVortex { position, strength: y0.strength };
+            let position = y0.position + self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4);
+            *y0 = PointVortex { position, ..*y0 };
         }
     }
 }
