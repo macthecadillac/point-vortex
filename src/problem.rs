@@ -1,5 +1,6 @@
 use crate::config::Problem;
 
+use derive_more::{Add, Sub, Sum, AddAssign};
 use itertools::Itertools;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
@@ -10,7 +11,7 @@ use std::ops::Mul;
 #[derive(Debug, Default, Clone, Copy)]
 #[derive(serde::Deserialize)]
 #[derive(npyz::AutoSerialize, npyz::Serialize)]
-#[derive(derive_more::Add, derive_more::Sub, derive_more::Sum, derive_more::AddAssign)]
+#[derive(Add, Sub, Sum, AddAssign)]
 pub struct Vector { pub x: f64, pub y: f64, pub z: f64 }
 
 impl Mul<Vector> for f64 {
@@ -89,12 +90,12 @@ impl Solver {
 
     fn first_order_change(&mut self, i: usize) {
         for ((j, k), &PointVortex { position, .. }) in self.buffer.ks[i].iter_mut().enumerate()
-                                                         .zip(self.state.point_vortices.iter()) {
+                                                           .zip(self.state.point_vortices.iter()) {
             self.buffer.other_vortices.clear();
             for &pv in self.state.point_vortices.iter()
-                                   .enumerate()
-                                   .filter(|&(k, _)| j != k)
-                                   .map(|(_, x)| x) {
+                           .enumerate()
+                           .filter(|&(k, _)| j != k)
+                           .map(|(_, x)| x) {
                 self.buffer.other_vortices.push(pv);
             }
             *k = ui(position, &self.buffer.other_vortices, self.rossby, self.sqg);
