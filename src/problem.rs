@@ -7,6 +7,7 @@ use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 
 use std::f64::consts::FRAC_1_PI;
+use std::iter::{once, repeat};
 use std::num::NonZeroU8;
 use std::ops::Mul;
 
@@ -54,8 +55,6 @@ struct PassiveTracerTimeStepper {
     rossby: f64,
     sqg: bool,
     dt: f64,
-    npv: usize,
-    npt: usize,
     state: State,
     buffer: Buffer,
 }
@@ -79,9 +78,7 @@ impl PassiveTracerTimeStepper {
                   vec![PointVortex::default(); n],
                   vec![PointVortex::default(); n]]
         };
-        let npv = point_vortices.len();
-        let npt = passive_tracers.len();
-        PassiveTracerTimeStepper { rossby, sqg, dt, state, buffer, npv, npt }
+        PassiveTracerTimeStepper { rossby, sqg, dt, state, buffer }
     }
 
     fn state(&self) -> &State {
@@ -112,7 +109,7 @@ impl PassiveTracerTimeStepper {
     }
 
     // Classic Runge-Kutta method
-    fn step(&mut self) {
+    fn next(&mut self) {
         self.first_order_change(0);
         self.euler_est(0.5 * self.dt, 0);
         self.first_order_change(1);
@@ -140,15 +137,16 @@ impl PassiveTracerTimeStepper {
 
 struct Thread {
     time_stepper: PassiveTracerTimeStepper,
-    point_vortices: Vec<Vector>,
-    passive_tracers: Vec<Vector>
+    point_vortices: Vec<Vec<Vector>>,
+    passive_tracers: Vec<Vec<Vector>>
 }
 
 pub struct Solver {
     write_interval: usize,
     niter: usize,
     threads: Vec<Thread>,
-    n: usize,
+    npv: usize,
+    npt: usize,
     output: Vec<u8>
 }
 
@@ -157,36 +155,46 @@ impl Solver {
         if let Some(n) = threads {
             ThreadPoolBuilder::new().num_threads(n as usize).build_global().unwrap();
         }
-        let n = threads.and_then(NonZeroU8::new).map(NonZeroU8::get).unwrap_or(1) as usize;
+        let niter = (problem.duration as f64 / problem.time_step).round() as usize;
+        let write_interval = problem.write_interval.unwrap_or(1);
+        let nthread = threads.and_then(NonZeroU8::new).map(NonZeroU8::get).unwrap_or(1) as usize;
         let npt = problem.passive_tracers.len();
-        let threads = problem.passive_tracers.chunks((npt / n).max(1)).map(|pt| {
+        let npv = problem.point_vortices.len();
+        let threads = problem.passive_tracers.chunks((npt / nthread).max(1)).map(|pt| {
             let pv = &problem.point_vortices;
             let rossby = problem.rossby;
             let dt = problem.time_step;
             let sqg = problem.sqg;
             let time_stepper = PassiveTracerTimeStepper::new(pv, pt, rossby, dt, sqg);
-            let pvx = pv.iter().map(|v| v.position).collect();
-            Thread { time_stepper, point_vortices: pvx, passive_tracers: pt.to_vec() }
+            let pvx = pv.iter().map(|v| once(v.position).chain(repeat(Vector::default()))
+                                                        .take(niter / write_interval)
+                                                        .collect())
+                        .collect();
+            let ptx = pt.iter().map(|&v| once(v).chain(repeat(Vector::default()))
+                                                        .take(niter / write_interval)
+                                                        .collect())
+                        .collect();
+            Thread { time_stepper, point_vortices: pvx, passive_tracers: ptx }
         }).collect();
-        let write_interval = problem.write_interval.unwrap_or(1);
-        let niter = (problem.duration as f64 / problem.time_step).round() as usize;
-        let n = problem.point_vortices.len() + problem.passive_tracers.len();
         let output = vec![];
-        Solver { threads, write_interval, niter, n, output }
+        Solver { threads, write_interval, niter, npv, npt, output }
     }
 
     pub fn solve(&mut self) {
         self.threads.par_iter_mut()
             .for_each(|thread| {
-                for i in 1..self.niter {
-                    thread.time_stepper.step();
-                    if i % self.write_interval == 0 {
-                        for pv in thread.time_stepper.state().point_vortices.iter() {
-                            thread.point_vortices.push(pv.position);
-                        }
-                        for &pt in thread.time_stepper.state().passive_tracers.iter() {
-                            thread.passive_tracers.push(pt);
-                        }
+                let nwrites = self.niter / self.write_interval;
+                for i in 1..nwrites {
+                    for _ in 0..self.write_interval {
+                        thread.time_stepper.next();
+                    }
+                    for (&pv, pvs) in thread.time_stepper.state().point_vortices.iter()
+                                                         .zip(thread.point_vortices.iter_mut()) {
+                        pvs[i] = pv.position
+                    }
+                    for (&pt, pts) in thread.time_stepper.state().passive_tracers.iter()
+                                                         .zip(thread.passive_tracers.iter_mut()) {
+                        pts[i] = pt;
                     }
                 }
             })
@@ -197,19 +205,17 @@ impl Solver {
         let nslice = self.niter / self.write_interval;
         let mut writer = npyz::WriteOptions::new()
             .default_dtype()
-            .shape(&[self.n as u64, nslice as u64])
+            .shape(&[(self.npv + self.npt) as u64, nslice as u64])
             .writer(&mut self.output)
             .begin_nd()?;
-        let npv = self.threads[0].time_stepper.npv;
         // write point vortex data, which should be identical across threads
-        for i in 0..npv {
-            writer.extend(self.threads[0].point_vortices.iter().skip(i).step_by(npv))?;
+        for pv in self.threads[0].point_vortices.iter() {
+            writer.extend(pv.iter())?;
         }
         // write tracer data
         for thread in self.threads.iter() {
-            let npt = thread.time_stepper.npt;
-            for i in 0..npt {
-                writer.extend(thread.passive_tracers.iter().skip(i).step_by(npt))?;
+            for pt in thread.passive_tracers.iter() {
+                writer.extend(pt.iter())?;
             }
         }
         writer.finish()?;
