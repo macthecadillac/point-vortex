@@ -30,7 +30,7 @@ impl Vector {
     }
 }
 
-#[derive(serde::Deserialize, Copy, Clone)]
+#[derive(serde::Deserialize, Copy, Clone, Default)]
 pub struct PointVortex {
     pub strength: f64,
     pub position: Vector
@@ -41,16 +41,17 @@ pub struct State {
     pub passive_tracers: Vec<Vector>
 }
 
+struct Buffer {
+    other_vortices: Vec<PointVortex>,
+    ks: [Vec<Vector>; 4]
+}
+
 pub struct Solver {
     rossby: f64,
     sqg: bool,
     dt: f64,
     state: State,
-    other_vortices: Vec<PointVortex>,
-    k1s: Vec<Vector>,
-    k2s: Vec<Vector>,
-    k3s: Vec<Vector>,
-    _k: Vec<Vector>,  // buffer space for self.first_order_change
+    buffer: Buffer,
     threads: Option<u8>
 }
 
@@ -64,41 +65,43 @@ impl Solver {
             passive_tracers: problem.passive_tracers.clone()
         };
         let n = state.point_vortices.len() + state.passive_tracers.len();
-        let other_vortices = vec![];
-        let k1s = vec![Vector::default(); n];
-        let k2s = vec![Vector::default(); n];
-        let k3s = vec![Vector::default(); n];
-        let _k = vec![Vector::default(); n];
+        let buffer = Buffer {
+            other_vortices: vec![PointVortex::default(); state.point_vortices.len() - 1],
+            ks: [vec![Vector::default(); n],
+                 vec![Vector::default(); n],
+                 vec![Vector::default(); n],
+                 vec![Vector::default(); n]]
+        };
         if let Some(n) = threads {
             ThreadPoolBuilder::new().num_threads(n as usize).build_global().unwrap();
         }
-        Solver { rossby, sqg, dt, state, other_vortices, k1s, k2s, k3s, _k, threads }
+        Solver { rossby, sqg, dt, state, buffer, threads }
     }
 
-    fn first_order_change(&mut self, state: &State) {
-        self._k.clear();
+    fn first_order_change(&mut self, i: usize, state: &State) {
+        self.buffer.ks[i].clear();
         for (j, &PointVortex { position, .. }) in state.point_vortices.iter().enumerate() {
-            self.other_vortices.clear();
+            self.buffer.other_vortices.clear();
             for &pv in state.point_vortices.iter()
                                    .enumerate()
                                    .filter(|&(k, _)| j != k)
                                    .map(|(_, x)| x) {
-                self.other_vortices.push(pv);
+                self.buffer.other_vortices.push(pv);
             }
-            self._k.push(ui(position, &self.other_vortices, self.rossby, self.sqg));
+            self.buffer.ks[i].push(ui(position, &self.buffer.other_vortices, self.rossby, self.sqg));
         }
-        if self.threads.is_some() {
-            let tmp: Vec<_> = state.passive_tracers.par_iter().map(|&pt| {
-                ui(pt, &state.point_vortices, self.rossby, self.sqg)
-            })
-            .collect();
-            self._k.extend_from_slice(&tmp);
-        }
-        else {
-            for &pt in state.passive_tracers.iter() {
-                self._k.push(ui(pt, &state.point_vortices, self.rossby, self.sqg));
-            }
-        }
+        // if self.threads.is_some() {
+        //     let tmp: Vec<_> = state.passive_tracers.par_iter().map(|&pt| {
+        //         ui(pt, &state.point_vortices, self.rossby, self.sqg)
+        //     })
+        //     .collect();
+        //     self.buffer.ks[i].extend_from_slice(&tmp);
+        // }
+        // else {
+        //     for &pt in state.passive_tracers.iter() {
+        //         self.buffer.ks[i].push(ui(pt, &state.point_vortices, self.rossby, self.sqg));
+        //     }
+        // }
     }
 
     fn euler_est(&self, slope: &[Vector], increment: f64, output: &mut State) {
@@ -108,30 +111,27 @@ impl Solver {
         for (&PointVortex { position: yn, strength }, &k) in pvs.iter().zip(&mut ks) {
             output.point_vortices.push(PointVortex { position: yn + increment * k, strength })
         }
-        let pts = &self.state.passive_tracers;
-        output.passive_tracers.clear();
-        for (&yn, &k) in pts.iter().zip(&mut ks) {
-            output.passive_tracers.push(yn + increment * k)
-        }
+        // let pts = &self.state.passive_tracers;
+        // output.passive_tracers.clear();
+        // for (&yn, &k) in pts.iter().zip(&mut ks) {
+        //     output.passive_tracers.push(yn + increment * k)
+        // }
     }
 
     // Classic Runge-Kutta method
     pub fn step(&mut self, buffer: &mut State) {
-        self.first_order_change(&buffer);
-        self.k1s.copy_from_slice(&self._k);
-        self.euler_est(&self.k1s, 0.5 * self.dt, buffer);
-        self.first_order_change(&buffer);
-        self.k2s.copy_from_slice(&self._k);
-        self.euler_est(&self.k2s, 0.5 * self.dt, buffer);
-        self.first_order_change(&buffer);
-        self.k3s.copy_from_slice(&self._k);
-        self.euler_est(&self.k3s, self.dt, buffer);
-        self.first_order_change(&buffer);
+        self.first_order_change(0, &buffer);
+        self.euler_est(&self.buffer.ks[0], 0.5 * self.dt, buffer);
+        self.first_order_change(1, &buffer);
+        self.euler_est(&self.buffer.ks[1], 0.5 * self.dt, buffer);
+        self.first_order_change(2, &buffer);
+        self.euler_est(&self.buffer.ks[2], self.dt, buffer);
+        self.first_order_change(3, &buffer);
         let c = 1. / 6.;
-        let mut k1s_iter = self.k1s.iter();
-        let mut k2s_iter = self.k2s.iter();
-        let mut k3s_iter = self.k3s.iter();
-        let mut k4s_iter = self._k.iter();
+        let mut k1s_iter = self.buffer.ks[0].iter();
+        let mut k2s_iter = self.buffer.ks[1].iter();
+        let mut k3s_iter = self.buffer.ks[2].iter();
+        let mut k4s_iter = self.buffer.ks[3].iter();
         for (((((x_, &x), &k1), &k2), &k3), &k4) in buffer.point_vortices
                                                           .iter_mut()
                                                           .zip(self.state.point_vortices.iter())
