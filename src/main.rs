@@ -49,19 +49,15 @@ fn main() -> Result<(), error::Error> {
         writer.push(&tracer)?;
     }
 
-    let mut output = problem::State {
-        point_vortices: problem.point_vortices.clone(),
-        passive_tracers: problem.passive_tracers.clone()
-    };
     let mut solver = problem::Solver::new(&problem, args.threads);
 
     for i in 1..niter {
-        solver.step(&mut output);
+        solver.step();
         if i % stride == 0 {
-            for pv in output.point_vortices.iter() {
+            for pv in solver.state().point_vortices.iter() {
                 writer.push(&pv.position)?;
             }
-            for pt in output.passive_tracers.iter() {
+            for pt in solver.state().passive_tracers.iter() {
                 writer.push(&pt)?;
             }
         }

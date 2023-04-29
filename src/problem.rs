@@ -10,7 +10,7 @@ use std::ops::Mul;
 #[derive(Debug, Default, Clone, Copy)]
 #[derive(serde::Deserialize)]
 #[derive(npyz::AutoSerialize, npyz::Serialize)]
-#[derive(derive_more::Add, derive_more::Sub, derive_more::Sum)]
+#[derive(derive_more::Add, derive_more::Sub, derive_more::Sum, derive_more::AddAssign)]
 pub struct Vector { pub x: f64, pub y: f64, pub z: f64 }
 
 impl Mul<Vector> for f64 {
@@ -43,7 +43,8 @@ pub struct State {
 
 struct Buffer {
     other_vortices: Vec<PointVortex>,
-    ks: [Vec<Vector>; 4]
+    ks: [Vec<Vector>; 4],
+    yns: [Vec<PointVortex>; 4]
 }
 
 pub struct Solver {
@@ -70,7 +71,11 @@ impl Solver {
             ks: [vec![Vector::default(); n],
                  vec![Vector::default(); n],
                  vec![Vector::default(); n],
-                 vec![Vector::default(); n]]
+                 vec![Vector::default(); n]],
+            yns: [vec![PointVortex::default(); n],
+                  vec![PointVortex::default(); n],
+                  vec![PointVortex::default(); n],
+                  vec![PointVortex::default(); n]]
         };
         if let Some(n) = threads {
             ThreadPoolBuilder::new().num_threads(n as usize).build_global().unwrap();
@@ -78,80 +83,61 @@ impl Solver {
         Solver { rossby, sqg, dt, state, buffer, threads }
     }
 
-    fn first_order_change(&mut self, i: usize, state: &State) {
-        self.buffer.ks[i].clear();
-        for (j, &PointVortex { position, .. }) in state.point_vortices.iter().enumerate() {
+    pub fn state(&self) -> &State {
+        &self.state
+    }
+
+    fn first_order_change(&mut self, i: usize) {
+        for ((j, k), &PointVortex { position, .. }) in self.buffer.ks[i].iter_mut().enumerate()
+                                                         .zip(self.state.point_vortices.iter()) {
             self.buffer.other_vortices.clear();
-            for &pv in state.point_vortices.iter()
+            for &pv in self.state.point_vortices.iter()
                                    .enumerate()
                                    .filter(|&(k, _)| j != k)
                                    .map(|(_, x)| x) {
                 self.buffer.other_vortices.push(pv);
             }
-            self.buffer.ks[i].push(ui(position, &self.buffer.other_vortices, self.rossby, self.sqg));
+            *k = ui(position, &self.buffer.other_vortices, self.rossby, self.sqg);
         }
-        // if self.threads.is_some() {
-        //     let tmp: Vec<_> = state.passive_tracers.par_iter().map(|&pt| {
-        //         ui(pt, &state.point_vortices, self.rossby, self.sqg)
-        //     })
-        //     .collect();
-        //     self.buffer.ks[i].extend_from_slice(&tmp);
-        // }
-        // else {
-        //     for &pt in state.passive_tracers.iter() {
-        //         self.buffer.ks[i].push(ui(pt, &state.point_vortices, self.rossby, self.sqg));
-        //     }
-        // }
     }
 
-    fn euler_est(&self, slope: &[Vector], increment: f64, output: &mut State) {
-        output.point_vortices.clear();
+    fn euler_est(&mut self, increment: f64, i: usize) {
+        self.buffer.yns[i].clear();
         let pvs = &self.state.point_vortices;
-        let mut ks = slope.iter();
+        let mut ks = self.buffer.ks[i].iter();
         for (&PointVortex { position: yn, strength }, &k) in pvs.iter().zip(&mut ks) {
-            output.point_vortices.push(PointVortex { position: yn + increment * k, strength })
+            self.buffer.yns[i].push(PointVortex { position: yn + increment * k, strength })
         }
-        // let pts = &self.state.passive_tracers;
-        // output.passive_tracers.clear();
-        // for (&yn, &k) in pts.iter().zip(&mut ks) {
-        //     output.passive_tracers.push(yn + increment * k)
-        // }
     }
 
     // Classic Runge-Kutta method
-    pub fn step(&mut self, buffer: &mut State) {
-        self.first_order_change(0, &buffer);
-        self.euler_est(&self.buffer.ks[0], 0.5 * self.dt, buffer);
-        self.first_order_change(1, &buffer);
-        self.euler_est(&self.buffer.ks[1], 0.5 * self.dt, buffer);
-        self.first_order_change(2, &buffer);
-        self.euler_est(&self.buffer.ks[2], self.dt, buffer);
-        self.first_order_change(3, &buffer);
-        let c = 1. / 6.;
-        let mut k1s_iter = self.buffer.ks[0].iter();
-        let mut k2s_iter = self.buffer.ks[1].iter();
-        let mut k3s_iter = self.buffer.ks[2].iter();
-        let mut k4s_iter = self.buffer.ks[3].iter();
-        for (((((x_, &x), &k1), &k2), &k3), &k4) in buffer.point_vortices
-                                                          .iter_mut()
-                                                          .zip(self.state.point_vortices.iter())
-                                                          .zip(&mut k1s_iter)
-                                                          .zip(&mut k2s_iter)
-                                                          .zip(&mut k3s_iter)
-                                                          .zip(&mut k4s_iter) {
-            x_.position = x.position + c * self.dt * (k1 + 2. * k2 + 2. * k3 + k4)
+    pub fn step(&mut self) {
+        self.first_order_change(0);
+        self.euler_est(0.5 * self.dt, 0);
+        self.first_order_change(1);
+        self.euler_est(0.5 * self.dt, 1);
+        self.first_order_change(2);
+        self.euler_est(self.dt, 2);
+        self.first_order_change(3);
+        let update = |x: &mut Vector| {
+            let k1 = ui(*x, &self.state.point_vortices, self.rossby, self.sqg);
+            let k2 = ui(*x + 0.5 * self.dt * k1, &self.buffer.yns[0], self.rossby, self.sqg);
+            let k3 = ui(*x + 0.5 * self.dt * k2, &self.buffer.yns[1], self.rossby, self.sqg);
+            let k4 = ui(*x + self.dt * k3, &self.buffer.yns[2], self.rossby, self.sqg);
+            *x += self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4)
+        };
+        match self.threads {
+            Some(_) => self.state.passive_tracers.par_iter_mut().for_each(update),
+            None => self.state.passive_tracers.iter_mut().for_each(update)
+        };
+        for (x, &k1, &k2, &k3, &k4) in self.state.point_vortices.iter_mut()
+                                                 .zip(self.buffer.ks[0].iter())
+                                                 .zip(self.buffer.ks[1].iter())
+                                                 .zip(self.buffer.ks[2].iter())
+                                                 .zip(self.buffer.ks[3].iter())
+                                                 .map(|((((a, b), c), d), e)| (a, b, c, d, e)) {
+            x.position += self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4);
         }
-        for (((((x_, &x), &k1), &k2), &k3), &k4) in buffer.passive_tracers
-                                                          .iter_mut()
-                                                          .zip(self.state.passive_tracers.iter())
-                                                          .zip(&mut k1s_iter)
-                                                          .zip(&mut k2s_iter)
-                                                          .zip(&mut k3s_iter)
-                                                          .zip(&mut k4s_iter) {
-            *x_ = x + c * self.dt * (k1 + 2. * k2 + 2. * k3 + k4)
-        }
-        self.state.point_vortices.copy_from_slice(&buffer.point_vortices);
-        self.state.passive_tracers.copy_from_slice(&buffer.passive_tracers);
     }
 }
 
