@@ -2,10 +2,13 @@ extern crate clap;
 extern crate derive_more;
 extern crate itertools;
 extern crate npyz;
+extern crate cache_size;
 extern crate serde;
 extern crate toml;
 
 use clap::Parser;
+use npyz::WriterBuilder;
+
 use std::fs::File;
 use std::io::prelude::*;
 use std::io::BufWriter;
@@ -29,11 +32,35 @@ fn main() -> Result<(), error::Error> {
     let problem = config::parse(&path)?;
 
     let mut solver = problem::Solver::new(&problem, args.threads);
-    solver.solve();
-    let npy_arr = solver.write()?;
 
+    let niter = (problem.duration as f64 / problem.time_step).round() as usize;
+    let write_interval = problem.write_interval.unwrap_or(1);
+    let nslice = niter / write_interval;
+    let npv = problem.point_vortices.len();
+    let npt = problem.passive_tracers.len();
+    let mut buf = vec![];
+    
+    let (mut pv_output, mut pt_output) = solver.create_buffer();
+    solver.solve(&mut pv_output, &mut pt_output);
+    let mut writer = npyz::WriteOptions::new()
+        .default_dtype()
+        .shape(&[(npv + npt) as u64, nslice as u64])
+        .writer(&mut buf)
+        .begin_nd()?;
+    // write point vortex data, which should be identical across threads
+    for pv in pv_output[0].iter() {
+        writer.extend(pv.iter())?;
+    }
+    // write tracer data
+    for thread in pt_output.iter() {
+        for pt in thread.iter() {
+            writer.extend(pt.iter())?;
+        }
+    }
+    writer.finish()?;
+    
     let file = File::create(path.with_extension("npy"))?;
-    let mut writer = BufWriter::new(file);
-    writer.write(&npy_arr)?;
+    let mut bufwriter = BufWriter::new(file);
+    bufwriter.write(&buf)?;
     Ok(())
 }

@@ -2,7 +2,7 @@ use crate::config::Problem;
 
 use derive_more::{Add, Sub, Sum, AddAssign};
 use itertools::Itertools;
-use npyz::WriterBuilder;
+// use npyz::WriterBuilder;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 
@@ -137,27 +137,24 @@ impl PassiveTracerTimeStepper {
 
 struct Thread {
     time_stepper: PassiveTracerTimeStepper,
-    point_vortices: Vec<Vec<Vector>>,
-    passive_tracers: Vec<Vec<Vector>>
 }
 
 pub struct Solver {
+    nthread: usize,
     write_interval: usize,
     niter: usize,
     threads: Vec<Thread>,
+    cache_size: usize,
     npv: usize,
     npt: usize,
-    output: Vec<u8>
 }
 
 impl Solver {
     pub fn new(problem: &Problem, threads: Option<u8>) -> Self {
-        if let Some(n) = threads {
-            ThreadPoolBuilder::new().num_threads(n as usize).build_global().unwrap();
-        }
         let niter = (problem.duration as f64 / problem.time_step).round() as usize;
         let write_interval = problem.write_interval.unwrap_or(1);
         let nthread = threads.and_then(NonZeroU8::new).map(NonZeroU8::get).unwrap_or(1) as usize;
+        ThreadPoolBuilder::new().num_threads(nthread).build_global().unwrap();
         let npt = problem.passive_tracers.len();
         let npv = problem.point_vortices.len();
         let threads = problem.passive_tracers.chunks((npt / nthread).max(1)).map(|pt| {
@@ -166,60 +163,75 @@ impl Solver {
             let dt = problem.time_step;
             let sqg = problem.sqg;
             let time_stepper = PassiveTracerTimeStepper::new(pv, pt, rossby, dt, sqg);
-            let pvx = pv.iter().map(|v| once(v.position).chain(repeat(Vector::default()))
-                                                        .take(niter / write_interval)
-                                                        .collect())
-                        .collect();
-            let ptx = pt.iter().map(|&v| once(v).chain(repeat(Vector::default()))
-                                                        .take(niter / write_interval)
-                                                        .collect())
-                        .collect();
-            Thread { time_stepper, point_vortices: pvx, passive_tracers: ptx }
+            Thread { time_stepper }
         }).collect();
-        let output = vec![];
-        Solver { threads, write_interval, niter, npv, npt, output }
+        let l1cache = cache_size::l1_cache_size().unwrap_or(0);
+        let l2cache = cache_size::l1_cache_size().unwrap_or(0);
+        let l3cache = cache_size::l1_cache_size().unwrap_or(0);
+        let cache = l1cache + l2cache + l3cache;
+        Solver { nthread, threads, write_interval, niter, npv, npt, cache_size: cache }
     }
 
-    pub fn solve(&mut self) {
+    pub fn create_buffer(&self) -> (Vec<Vec<Vec<Vector>>>, Vec<Vec<Vec<Vector>>>) {
+        let mut pv_output = vec![];
+        let mut pt_output = vec![];
+        for thread in self.threads.iter() {
+            let mut pv_out: Vec<Vec<_>> = vec![];
+            let mut pt_out: Vec<Vec<_>> = vec![];
+            for &pv in thread.time_stepper.state.point_vortices.iter() {
+                pv_out.push(once(pv.position).chain(repeat(Vector::default()))
+                                             .take(self.niter / self.write_interval)
+                                             .collect());
+            }
+            for &pt in thread.time_stepper.state.passive_tracers.iter() {
+                pt_out.push(once(pt).chain(repeat(Vector::default()))
+                                    .take(self.niter / self.write_interval)
+                                    .collect());
+            }
+            pv_output.push(pv_out);
+            pt_output.push(pt_out);
+        }
+        (pv_output, pt_output)
+    }
+
+    pub fn solve(&mut self,
+                 pv_output: &mut [Vec<Vec<Vector>>],
+                 pt_output: &mut [Vec<Vec<Vector>>]) {
+        let state_size = 10 * (self.npv * self.nthread + self.npt);
+        let chunk_size = self.cache_size / (8 * (self.npv + self.npt / self.threads.len())) - state_size;
         self.threads.par_iter_mut()
-            .for_each(|thread| {
+            .zip(pv_output.par_iter_mut())
+            .zip(pt_output.par_iter_mut())
+            .for_each(|((thread, pvs), pts)| {
+                // initial state
+                for (&pv, pvs) in thread.time_stepper.state().point_vortices.iter().zip(pvs.iter_mut()) {
+                    pvs[0] = pv.position
+                }
+                for (&pt, pts) in thread.time_stepper.state().passive_tracers.iter().zip(pts.iter_mut()) {
+                    pts[0] = pt;
+                }
+
                 let nwrites = self.niter / self.write_interval;
-                for i in 1..nwrites {
-                    for _ in 0..self.write_interval {
-                        thread.time_stepper.next();
-                    }
-                    for (&pv, pvs) in thread.time_stepper.state().point_vortices.iter()
-                                                         .zip(thread.point_vortices.iter_mut()) {
-                        pvs[i] = pv.position
-                    }
-                    for (&pt, pts) in thread.time_stepper.state().passive_tracers.iter()
-                                                         .zip(thread.passive_tracers.iter_mut()) {
-                        pts[i] = pt;
+                for ((chunk, pv_chunk), pt_chunk) in (1..nwrites).chunks(chunk_size).into_iter()
+                                                                 .zip(pvs.chunks_mut(chunk_size))
+                                                                 .zip(pts.chunks_mut(chunk_size)) {
+                    // set up chunks
+                    for i in chunk {
+                        for _ in 0..self.write_interval {
+                            thread.time_stepper.next();
+                        }
+                        for (&pv, pvs) in thread.time_stepper.state().point_vortices.iter()
+                                                             .zip(pv_chunk.iter_mut()) {
+                            pvs[i] = pv.position
+                        }
+                        for (&pt, pts) in thread.time_stepper.state().passive_tracers.iter()
+                                                             .zip(pt_chunk.iter_mut()) {
+                            pts[i] = pt;
+                        }
                     }
                 }
             })
         ;
-    }
-
-    pub fn write(&mut self) -> Result<&[u8], crate::error::Error> {
-        let nslice = self.niter / self.write_interval;
-        let mut writer = npyz::WriteOptions::new()
-            .default_dtype()
-            .shape(&[(self.npv + self.npt) as u64, nslice as u64])
-            .writer(&mut self.output)
-            .begin_nd()?;
-        // write point vortex data, which should be identical across threads
-        for pv in self.threads[0].point_vortices.iter() {
-            writer.extend(pv.iter())?;
-        }
-        // write tracer data
-        for thread in self.threads.iter() {
-            for pt in thread.passive_tracers.iter() {
-                writer.extend(pt.iter())?;
-            }
-        }
-        writer.finish()?;
-        Ok(&self.output)
     }
 }
 
