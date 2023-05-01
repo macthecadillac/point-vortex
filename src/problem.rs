@@ -2,7 +2,7 @@ use crate::config::Problem;
 
 use derive_more::{Add, Sub, Sum, AddAssign};
 use itertools::Itertools;
-// use npyz::WriterBuilder;
+use npyz::WriterBuilder;
 use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 
@@ -40,45 +40,74 @@ pub struct PointVortex {
     pub position: Vector
 }
 
+#[derive(Copy, Clone, Default)]
+pub struct IndexedPointVortex {
+    pub index: usize,
+    pub point_vortex: PointVortex
+}
+
+#[derive(Copy, Clone, Default)]
+pub struct IndexedPassiveTracer {
+    pub index: usize,
+    pub position: Vector
+}
+
+#[derive(Copy, Clone, Default)]
+pub enum Data {
+    #[default]
+    Empty,
+    PointVortex(IndexedPointVortex),
+    PassiveTracer(IndexedPassiveTracer)
+}
+
 pub struct State {
-    pub point_vortices: Vec<PointVortex>,
-    pub passive_tracers: Vec<Vector>
+    pub point_vortices: Vec<IndexedPointVortex>,
+    pub passive_tracers: Vec<IndexedPassiveTracer>
 }
 
 struct Buffer {
-    other_vortices: Vec<PointVortex>,
+    other_vortices: Vec<IndexedPointVortex>,
     ks: [Vec<Vector>; 4],
-    yns: [Vec<PointVortex>; 4]
+    yns: [Vec<IndexedPointVortex>; 4]
 }
 
-pub struct PassiveTracerTimeStepper {
+#[derive(Copy, Clone)]
+enum ObjectIndex {
+    PointVortex(u8),
+    PassiveTracer(u8)
+}
+
+pub struct TimeStepper {
     rossby: f64,
     sqg: bool,
     dt: f64,
     state: State,
     buffer: Buffer,
+    output_queue: Vec<ObjectIndex>
 }
 
-impl PassiveTracerTimeStepper {
-    fn new(point_vortices: &[PointVortex], passive_tracers: &[Vector], rossby: f64,
-               dt: f64, sqg: bool) -> Self {
+impl TimeStepper {
+    fn new(point_vortices: &[IndexedPointVortex],
+           passive_tracers: &[IndexedPassiveTracer],
+           rossby: f64, dt: f64, sqg: bool) -> Self {
         let state = State {
             point_vortices: point_vortices.to_vec(),
             passive_tracers: passive_tracers.to_vec()
         };
         let n = state.point_vortices.len();
         let buffer = Buffer {
-            other_vortices: vec![PointVortex::default(); n - 1],
+            other_vortices: vec![IndexedPointVortex::default(); n - 1],
             ks: [vec![Vector::default(); n],
                  vec![Vector::default(); n],
                  vec![Vector::default(); n],
                  vec![Vector::default(); n]],
-            yns: [vec![PointVortex::default(); n],
-                  vec![PointVortex::default(); n],
-                  vec![PointVortex::default(); n],
-                  vec![PointVortex::default(); n]]
+            yns: [vec![IndexedPointVortex::default(); n],
+                  vec![IndexedPointVortex::default(); n],
+                  vec![IndexedPointVortex::default(); n],
+                  vec![IndexedPointVortex::default(); n]]
         };
-        PassiveTracerTimeStepper { rossby, sqg, dt, state, buffer }
+        let output_queue = vec![];
+        TimeStepper { rossby, sqg, dt, state, buffer, output_queue }
     }
 
     pub fn state(&self) -> &State {
@@ -86,8 +115,9 @@ impl PassiveTracerTimeStepper {
     }
 
     fn first_order_change(&mut self, i: usize) {
-        for ((j, k), &PointVortex { position, .. }) in self.buffer.ks[i].iter_mut().enumerate()
-                                                           .zip(self.state.point_vortices.iter()) {
+        for ((j, k), &ipv) in self.buffer.ks[i].iter_mut()
+                                  .enumerate()
+                                  .zip(self.state.point_vortices.iter()) {
             self.buffer.other_vortices.clear();
             for &pv in self.state.point_vortices.iter()
                            .enumerate()
@@ -95,7 +125,8 @@ impl PassiveTracerTimeStepper {
                            .map(|(_, x)| x) {
                 self.buffer.other_vortices.push(pv);
             }
-            *k = ui(position, &self.buffer.other_vortices, self.rossby, self.sqg);
+            *k = ui(ipv.point_vortex.position, &self.buffer.other_vortices,
+                    self.rossby, self.sqg);
         }
     }
 
@@ -103,8 +134,11 @@ impl PassiveTracerTimeStepper {
         self.buffer.yns[i].clear();
         let pvs = &self.state.point_vortices;
         let mut ks = self.buffer.ks[i].iter();
-        for (&PointVortex { position: yn, strength }, &k) in pvs.iter().zip(&mut ks) {
-            self.buffer.yns[i].push(PointVortex { position: yn + increment * k, strength })
+        for (&ipv, &k) in pvs.iter().zip(&mut ks) {
+            let yn = ipv.point_vortex.position;
+            let point_vortex = PointVortex { position: yn + increment * k,
+                                             ..ipv.point_vortex };
+            self.buffer.yns[i].push(IndexedPointVortex { point_vortex, ..ipv })
         }
     }
 
@@ -118,11 +152,11 @@ impl PassiveTracerTimeStepper {
         self.euler_est(self.dt, 2);
         self.first_order_change(3);
         for tracer in self.state.passive_tracers.iter_mut() {
-            let k1 = ui(*tracer, &self.state.point_vortices, self.rossby, self.sqg);
-            let k2 = ui(*tracer + 0.5 * self.dt * k1, &self.buffer.yns[0], self.rossby, self.sqg);
-            let k3 = ui(*tracer + 0.5 * self.dt * k2, &self.buffer.yns[1], self.rossby, self.sqg);
-            let k4 = ui(*tracer + self.dt * k3, &self.buffer.yns[2], self.rossby, self.sqg);
-            *tracer += self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4);
+            let k1 = ui(tracer.position, &self.state.point_vortices, self.rossby, self.sqg);
+            let k2 = ui(tracer.position + 0.5 * self.dt * k1, &self.buffer.yns[0], self.rossby, self.sqg);
+            let k3 = ui(tracer.position + 0.5 * self.dt * k2, &self.buffer.yns[1], self.rossby, self.sqg);
+            let k4 = ui(tracer.position + self.dt * k3, &self.buffer.yns[2], self.rossby, self.sqg);
+            tracer.position += self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4);
         }
         for (x, &k1, &k2, &k3, &k4) in self.state.point_vortices.iter_mut()
                                                  .zip(self.buffer.ks[0].iter())
@@ -130,8 +164,47 @@ impl PassiveTracerTimeStepper {
                                                  .zip(self.buffer.ks[2].iter())
                                                  .zip(self.buffer.ks[3].iter())
                                                  .map(|((((a, b), c), d), e)| (a, b, c, d, e)) {
-            x.position += self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4);
+            x.point_vortex.position += self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4);
         }
+    }
+}
+
+pub struct Output {
+    // nrow: usize,
+    // ncol: usize,
+    npv: usize,
+    npt: usize,
+    data: Vec<Data>
+}
+
+impl Output {
+    pub fn write(&self) -> Result<Vec<u8>, crate::error::Error> {
+        let nrow = self.npv + self.npt;
+        let ncol = self.data.len() / nrow;
+        let mut buf = vec![];
+        let mut writer = npyz::WriteOptions::new()
+            .default_dtype()
+            .shape(&[nrow as u64, ncol as u64])
+            .writer(&mut buf)
+            .begin_nd()?;
+        for i in 0..self.npv {
+            writer.extend(self.data.iter().filter_map(|data| {
+                match data {
+                    Data::PointVortex(pv) if pv.index == i => Some(pv.point_vortex.position),
+                    _ => None
+                }
+            }))?;
+        }
+        for i in 0..self.npt {
+            writer.extend(self.data.iter().filter_map(|data| {
+                match data {
+                    Data::PassiveTracer(pt) if pt.index == i => Some(pt.position),
+                    _ => None
+                }
+            }))?;
+        }
+        writer.finish()?;
+        Ok(buf)
     }
 }
 
@@ -139,8 +212,8 @@ pub struct Solver {
     nthread: usize,
     write_interval: usize,
     niter: usize,
-    pub threads: Vec<PassiveTracerTimeStepper>,
-    cache_size: usize,
+    pub threads: Vec<TimeStepper>,
+    chunk_size: usize,
     npv: usize,
     npt: usize,
 }
@@ -153,83 +226,60 @@ impl Solver {
         ThreadPoolBuilder::new().num_threads(nthread).build_global().unwrap();
         let npt = problem.passive_tracers.len();
         let npv = problem.point_vortices.len();
-        let threads = problem.passive_tracers.chunks((npt / nthread).max(1)).map(|pt| {
-            let pv = &problem.point_vortices;
+        let passive_tracers: Vec<_> = problem.passive_tracers.iter()
+            .enumerate()
+            .map(|(index, &position)| IndexedPassiveTracer { index, position })
+            .collect();
+        let point_vortices: Vec<_> = problem.point_vortices.iter()
+            .enumerate()
+            .map(|(index, &point_vortex)| IndexedPointVortex { index, point_vortex })
+            .collect();
+        let threads = passive_tracers.chunks((npt / nthread).max(1)).map(|pt| {
+            let pv = &point_vortices;
             let rossby = problem.rossby;
             let dt = problem.time_step;
             let sqg = problem.sqg;
-            PassiveTracerTimeStepper::new(pv, pt, rossby, dt, sqg)
+            TimeStepper::new(pv, pt, rossby, dt, sqg)
         }).collect();
-        let l1cache = cache_size::l1_cache_size().unwrap_or(0);
-        let l2cache = cache_size::l1_cache_size().unwrap_or(0);
-        let l3cache = cache_size::l1_cache_size().unwrap_or(0);
-        let cache = {
-            let cache = l1cache + l2cache + l3cache;
-            if cache == 0 { 5_000_000 } else { cache }
-        };
-        Solver { nthread, threads, write_interval, niter, npv, npt, cache_size: cache }
+        let chunk_size = 10_485_760;
+        Solver { nthread, threads, write_interval, niter, npv, npt, chunk_size }
     }
 
-    pub fn create_buffer(&self) -> (Vec<Vec<Vector>>, Vec<Vec<Vector>>) {
-        let mut pv_output = vec![];
-        let mut pt_output = vec![];
-        for thread in self.threads.iter() {
-            let npv = thread.state().point_vortices.len();
-            let npt = thread.state().passive_tracers.len();
-            let slices = self.niter / self.write_interval;
-            let pv_out = thread.state().point_vortices.iter()
-                               .map(|v| v.position)
-                               .chain(repeat(Vector::default()))
-                               .take(slices * npv)
-                               .collect();
-            let pt_out = thread.state().passive_tracers.iter().cloned()
-                               .chain(repeat(Vector::default()))
-                               .take(slices * npt)
-                               .collect();
-            pv_output.push(pv_out);
-            pt_output.push(pt_out);
-        }
-        (pv_output, pt_output)
+    pub fn create_buffer(&self) -> Output {
+        let n = (self.niter / self.write_interval) * (self.npt + self.npv);
+        let data = repeat(Data::default()).take(n).collect();
+        Output { data, npt: self.npt, npv: self.npv }
     }
 
-    pub fn solve(&mut self,
-                 pv_output: &mut [Vec<Vector>],
-                 pt_output: &mut [Vec<Vector>]) {
-        let nthread = self.threads.len();
-        self.threads.par_iter_mut()
-            .zip(pv_output.par_iter_mut())
-            .zip(pt_output.par_iter_mut())
-            .for_each(|((thread, pvs), pts)| {
-                // initial state
-                for (&pv, pvs) in thread.state().point_vortices.iter().zip(pvs.iter_mut()) {
-                    *pvs = pv.position
-                }
-                for (&pt, pts) in thread.state().passive_tracers.iter().zip(pts.iter_mut()) {
-                    *pts = pt;
-                }
-
-                let npv = thread.state().point_vortices.len();
-                let npt = thread.state().passive_tracers.len();
-                let iter_size = 3 * (self.npv + self.npt);  // in word size
-                let state_size = 10 * (self.npv * self.nthread + self.npt);
-                let available_cache = self.cache_size / (8 * (self.npv + self.npt / nthread)) - state_size;
-                let chunk_size = (available_cache / iter_size) * iter_size;
-                for (pv_chunk, pt_chunk) in pvs.chunks_mut(chunk_size).zip(pts.chunks_mut(chunk_size)) {
-                    // set up chunks
-                    for (pvc, ptc) in pv_chunk.chunks_mut(npv).zip(pt_chunk.chunks_mut(npt)) {
-                        for _ in 0..self.write_interval {
-                            thread.next();
-                        }
-                        for (&pv, pv_) in thread.state().point_vortices.iter().zip(pvc.iter_mut()) {
-                            *pv_ = pv.position;
-                        }
-                        for (&pt, pt_) in thread.state().passive_tracers.iter().zip(ptc.iter_mut()) {
-                            *pt_ = pt;
+    pub fn solve(&mut self, output: &mut Output) {
+        output.data.par_chunks_mut(self.chunk_size).for_each(|chunk| {
+            let n = chunk.len();
+            let niter = n / self.threads.len();
+            for _ in 0..niter {
+                chunk.par_iter_mut().zip(self.threads.par_iter_mut())
+                          .for_each(|(cell, thread)| {
+                    loop {
+                        match thread.output_queue.pop() {
+                            Some(ObjectIndex::PointVortex(i)) => {
+                                let pv = thread.state().point_vortices[i as usize];
+                                *cell = Data::PointVortex(pv);
+                                break
+                            },
+                            Some(ObjectIndex::PassiveTracer(i)) => {
+                                let pt = thread.state().passive_tracers[i as usize];
+                                *cell = Data::PassiveTracer(pt);
+                                break
+                            }
+                            None => {
+                                for _ in 0..self.write_interval {
+                                    thread.next();
+                                }
+                            }
                         }
                     }
-                }
-            })
-        ;
+                })
+            }
+        })
     }
 }
 
@@ -269,21 +319,24 @@ fn u1pijk(vtx: Vector, vtx1: Vector, vtx2: Vector, sqg: bool) -> Vector {
     coeff * Vector { x, y, z }
 }
 
-fn ui(vtx: Vector, other_vtxs: &[PointVortex], rossby: f64, sqg: bool) -> Vector {
+fn ui(vtx: Vector, other_vtxs: &[IndexedPointVortex],
+      rossby: f64, sqg: bool) -> Vector {
     let u0: Vector = other_vtxs
         .iter()
-        .map(|&pv| pv.strength * u0ij(vtx, pv.position, sqg))
+        .map(|&pv| pv.point_vortex.strength * u0ij(vtx, pv.point_vortex.position, sqg))
         .sum();
     let u1s: Vector = other_vtxs
         .iter()
-        .map(|&pv| pv.strength * pv.strength * u1sij(vtx, pv.position, sqg))
+        .map(|&pv| pv.point_vortex.strength.powi(2) * u1sij(vtx, pv.point_vortex.position, sqg))
         .sum();
     let u1p: Vector = other_vtxs
         .iter()
         .combinations(2)
         .map(|pvs| {
-            let &PointVortex { strength: gamma1, position: vtx1 } = pvs[0];
-            let &PointVortex { strength: gamma2, position: vtx2 } = pvs[1];
+            let gamma1 = pvs[0].point_vortex.strength;
+            let gamma2 = pvs[1].point_vortex.strength;
+            let vtx1 = pvs[0].point_vortex.position;
+            let vtx2 = pvs[1].point_vortex.position;
             gamma1 * gamma2 * u1pijk(vtx, vtx1, vtx2, sqg)
         })
         .sum();
