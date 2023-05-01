@@ -2,7 +2,6 @@ extern crate clap;
 extern crate derive_more;
 extern crate itertools;
 extern crate npyz;
-extern crate cache_size;
 extern crate serde;
 extern crate toml;
 
@@ -44,29 +43,18 @@ fn main() -> Result<(), error::Error> {
     solver.solve(&mut pv_output, &mut pt_output);
     let mut writer = npyz::WriteOptions::new()
         .default_dtype()
-        .shape(&[nslice as u64, (npv + npt) as u64])
+        .shape(&[(npv + npt) as u64, nslice as u64])
         .writer(&mut buf)
         .begin_nd()?;
     // write point vortex data, which should be identical across threads
-    // (pv_output[0].chunks(npv)
-    //     .zip(solver.threads.iter()
-    //         .map(|t| t.state().passive_tracers.len())
-    //         .zip(pt_output.iter())
-    //         .map(|(n, pts)| pts.chunks(n)))  // FIXME: Here lies the problem
-    //     .flat_map(|(a, b)| std::iter::once(a).chain(b.into_iter()).flatten()))?;
-    let mut ptcs: Vec<_> = solver.threads.iter()
-            .map(|t| t.state().passive_tracers.len())
-            .zip(pt_output.iter_mut())
-            .map(|(n, pts)| pts.chunks_mut(n))
-            .collect();
-    for pvc in pv_output[0].chunks(npv) {
-        writer.extend(pvc.iter())?;
-        for ptc in ptcs.iter_mut() {
-            let chunk = ptc.next();
-            match chunk {
-                None => break,
-                Some(c) => writer.extend(c.iter())?
-            }
+    for i in 0..npv {
+        writer.extend(pv_output[0].iter().skip(i).step_by(npv))?;
+    }
+    for (thread, pts) in solver.threads.iter().zip(pt_output.iter()) {
+        let passive_tracers = &thread.state().passive_tracers;
+        let npt = passive_tracers.len();
+        for j in 0..npt {
+            writer.extend(pts.iter().skip(j).step_by(npt))?;
         }
     }
     writer.finish()?;

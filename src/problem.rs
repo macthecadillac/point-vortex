@@ -136,13 +136,10 @@ impl PassiveTracerTimeStepper {
 }
 
 pub struct Solver {
-    nthread: usize,
     write_interval: usize,
     niter: usize,
     pub threads: Vec<PassiveTracerTimeStepper>,
     cache_size: usize,
-    npv: usize,
-    npt: usize,
 }
 
 impl Solver {
@@ -152,7 +149,6 @@ impl Solver {
         let nthread = threads.and_then(NonZeroU8::new).map(NonZeroU8::get).unwrap_or(1) as usize;
         ThreadPoolBuilder::new().num_threads(nthread).build_global().unwrap();
         let npt = problem.passive_tracers.len();
-        let npv = problem.point_vortices.len();
         let threads = problem.passive_tracers.chunks((npt / nthread).max(1)).map(|pt| {
             let pv = &problem.point_vortices;
             let rossby = problem.rossby;
@@ -160,14 +156,8 @@ impl Solver {
             let sqg = problem.sqg;
             PassiveTracerTimeStepper::new(pv, pt, rossby, dt, sqg)
         }).collect();
-        let l1cache = cache_size::l1_cache_size().unwrap_or(0);
-        let l2cache = cache_size::l1_cache_size().unwrap_or(0);
-        let l3cache = cache_size::l1_cache_size().unwrap_or(0);
-        let cache = {
-            let cache = l1cache + l2cache + l3cache;
-            if cache == 0 { 5_000_000 } else { cache }
-        };
-        Solver { nthread, threads, write_interval, niter, npv, npt, cache_size: cache }
+        let cache_size = 10_000_000;
+        Solver { threads, write_interval, niter, cache_size }
     }
 
     pub fn create_buffer(&self) -> (Vec<Vec<Vector>>, Vec<Vec<Vector>>) {
@@ -210,11 +200,14 @@ impl Solver {
 
                 let npv = thread.state().point_vortices.len();
                 let npt = thread.state().passive_tracers.len();
-                let iter_size = 3 * (self.npv + self.npt);  // in word size
-                let state_size = 10 * (self.npv * self.nthread + self.npt);
-                let available_cache = self.cache_size / (8 * (self.npv + self.npt / nthread)) - state_size;
-                let chunk_size = (available_cache / iter_size) * iter_size;
-                for (pv_chunk, pt_chunk) in pvs.chunks_mut(chunk_size).zip(pts.chunks_mut(chunk_size)) {
+                let item_size = 3 * (npv + npt);  // in word size
+                let struct_size = 4 * (2 * npv - 1 + 4) + 3 * (npt + 4 * npv) + 3; // in word size
+                let available_cache = self.cache_size / nthread - 8 * struct_size; // in bytes
+                let c_size = available_cache / (8 * (npv + npt)); // in word size
+                let chunk_size = (c_size / item_size) * item_size;
+                let pv_cs = chunk_size / item_size * npv;
+                let pt_cs = chunk_size / item_size * npt;
+                for (pv_chunk, pt_chunk) in pvs.chunks_mut(pv_cs).zip(pts.chunks_mut(pt_cs)) {
                     // set up chunks
                     for (pvc, ptc) in pv_chunk.chunks_mut(npv).zip(pt_chunk.chunks_mut(npt)) {
                         for _ in 0..self.write_interval {
