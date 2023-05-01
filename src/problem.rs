@@ -7,7 +7,7 @@ use rayon::prelude::*;
 use rayon::ThreadPoolBuilder;
 
 use std::f64::consts::FRAC_1_PI;
-use std::iter::{once, repeat};
+use std::iter::repeat;
 use std::num::NonZeroU8;
 use std::ops::Mul;
 
@@ -137,8 +137,8 @@ impl PassiveTracerTimeStepper {
 
 struct Thread {
     time_stepper: PassiveTracerTimeStepper,
-    point_vortices: Vec<Vec<Vector>>,
-    passive_tracers: Vec<Vec<Vector>>
+    point_vortices: Vec<Vector>,
+    passive_tracers: Vec<Vector>
 }
 
 pub struct Solver {
@@ -166,14 +166,14 @@ impl Solver {
             let dt = problem.time_step;
             let sqg = problem.sqg;
             let time_stepper = PassiveTracerTimeStepper::new(pv, pt, rossby, dt, sqg);
-            let pvx = pv.iter().map(|v| once(v.position).chain(repeat(Vector::default()))
-                                                        .take(niter / write_interval)
-                                                        .collect())
-                        .collect();
-            let ptx = pt.iter().map(|&v| once(v).chain(repeat(Vector::default()))
-                                                        .take(niter / write_interval)
-                                                        .collect())
-                        .collect();
+            let pvx = pv.iter().map(|v| v.position)
+                               .chain(repeat(Vector::default()))
+                               .take(niter / write_interval * pv.len())
+                               .collect();
+            let ptx = pt.iter().cloned()
+                               .chain(repeat(Vector::default()))
+                               .take(niter / write_interval * pt.len())
+                               .collect();
             Thread { time_stepper, point_vortices: pvx, passive_tracers: ptx }
         }).collect();
         let output = vec![];
@@ -184,17 +184,19 @@ impl Solver {
         self.threads.par_iter_mut()
             .for_each(|thread| {
                 let nwrites = self.niter / self.write_interval;
+                let npt = thread.time_stepper.state().passive_tracers.len();
+                let npv = thread.time_stepper.state().point_vortices.len();
                 for i in 1..nwrites {
                     for _ in 0..self.write_interval {
                         thread.time_stepper.next();
                     }
-                    for (&pv, pvs) in thread.time_stepper.state().point_vortices.iter()
-                                                         .zip(thread.point_vortices.iter_mut()) {
-                        pvs[i] = pv.position
+                    for (&pv, pv_) in thread.time_stepper.state().point_vortices.iter()
+                                                         .zip(thread.point_vortices[i * npv..].iter_mut()) {
+                        *pv_ = pv.position
                     }
-                    for (&pt, pts) in thread.time_stepper.state().passive_tracers.iter()
-                                                         .zip(thread.passive_tracers.iter_mut()) {
-                        pts[i] = pt;
+                    for (&pt, pt_) in thread.time_stepper.state().passive_tracers.iter()
+                                                         .zip(thread.passive_tracers[i * npt..].iter_mut()) {
+                        *pt_ = pt;
                     }
                 }
             })
@@ -209,13 +211,14 @@ impl Solver {
             .writer(&mut self.output)
             .begin_nd()?;
         // write point vortex data, which should be identical across threads
-        for pv in self.threads[0].point_vortices.iter() {
-            writer.extend(pv.iter())?;
+        for i in 0..self.npv {
+            writer.extend(self.threads[0].point_vortices.iter().skip(i).step_by(self.npv))?;
         }
         // write tracer data
         for thread in self.threads.iter() {
-            for pt in thread.passive_tracers.iter() {
-                writer.extend(pt.iter())?;
+            let npt = thread.time_stepper.state.passive_tracers.len();
+            for i in 0..npt {
+                writer.extend(thread.passive_tracers.iter().skip(i).step_by(npt))?;
             }
         }
         writer.finish()?;
