@@ -1,14 +1,8 @@
-extern crate clap;
-extern crate derive_more;
-extern crate itertools;
-extern crate npyz;
-extern crate serde;
-extern crate toml;
-
 use clap::Parser;
 use npyz::WriterBuilder;
 
 use std::fs::File;
+use std::io;
 use std::io::prelude::*;
 use std::io::BufWriter;
 use std::path::Path;
@@ -22,10 +16,10 @@ mod problem;
 struct Args {
     config: String,
     #[arg(long)]
-    threads: Option<u8>
+    nosave: bool
 }
 
-fn main() -> Result<(), error::Error> {
+fn main() -> Result<(), main_error::MainError> {
     let args = Args::parse();
     let path = Path::new(&args.config);
     let problem = config::parse(&path)?;
@@ -49,8 +43,10 @@ fn main() -> Result<(), error::Error> {
         writer.push(&tracer)?;
     }
 
-    let mut solver = problem::Solver::new(&problem, args.threads);
-
+    let mut solver = problem::Solver::new(&problem);
+    let mut threshold = 1.;
+    print!("0.0% complete\r");
+    io::stdout().flush().unwrap();
     for i in 1..niter {
         solver.step();
         if i % stride == 0 {
@@ -61,11 +57,23 @@ fn main() -> Result<(), error::Error> {
                 writer.push(&pt)?;
             }
         }
+        let niter_f64 = niter as f64;
+        let i_f64 = i as f64;
+        let percent_done = (i_f64 + 1.) * 100. / niter_f64;
+        let hundredths = (percent_done * 10.).floor();
+        if hundredths > threshold {
+            threshold = hundredths;
+            print!("{:.1}% complete\r", percent_done);
+            io::stdout().flush().unwrap();
+        }
     }
     writer.finish()?;
 
-    let file = File::create(path.with_extension("npy"))?;
-    let mut writer = BufWriter::new(file);
-    writer.write(&buf)?;
+    if !args.nosave {
+        let file = File::create(path.with_extension("npy"))?;
+        let mut writer = BufWriter::new(file);
+        writer.write(&buf)?;
+    }
+
     Ok(())
 }

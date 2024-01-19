@@ -1,9 +1,6 @@
 use crate::config::Problem;
 
 use derive_more::{Add, Sub, Sum, AddAssign};
-use itertools::Itertools;
-use rayon::prelude::*;
-use rayon::ThreadPoolBuilder;
 
 use std::f64::consts::FRAC_1_PI;
 use std::ops::Mul;
@@ -54,11 +51,10 @@ pub struct Solver {
     dt: f64,
     state: State,
     buffer: Buffer,
-    threads: Option<u8>
 }
 
 impl Solver {
-    pub fn new(problem: &Problem, threads: Option<u8>) -> Self {
+    pub fn new(problem: &Problem) -> Self {
         let rossby = problem.rossby;
         let dt = problem.time_step;
         let sqg = problem.sqg;
@@ -78,10 +74,7 @@ impl Solver {
                   vec![PointVortex::default(); n],
                   vec![PointVortex::default(); n]]
         };
-        if let Some(n) = threads {
-            ThreadPoolBuilder::new().num_threads(n as usize).build_global().unwrap();
-        }
-        Solver { rossby, sqg, dt, state, buffer, threads }
+        Solver { rossby, sqg, dt, state, buffer }
     }
 
     pub fn state(&self) -> &State {
@@ -127,10 +120,7 @@ impl Solver {
             let k4 = ui(*x + self.dt * k3, &self.buffer.yns[2], self.rossby, self.sqg);
             *x += self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4)
         };
-        match self.threads {
-            Some(_) => self.state.passive_tracers.par_iter_mut().for_each(update),
-            None => self.state.passive_tracers.iter_mut().for_each(update)
-        };
+        self.state.passive_tracers.iter_mut().for_each(update);
         for (x, &k1, &k2, &k3, &k4) in self.state.point_vortices.iter_mut()
                                                  .zip(self.buffer.ks[0].iter())
                                                  .zip(self.buffer.ks[1].iter())
@@ -187,14 +177,15 @@ fn ui(vtx: Vector, other_vtxs: &[PointVortex], rossby: f64, sqg: bool) -> Vector
         .iter()
         .map(|&pv| pv.strength * pv.strength * u1sij(vtx, pv.position, sqg))
         .sum();
-    let u1p: Vector = other_vtxs
-        .iter()
-        .combinations(2)
-        .map(|pvs| {
-            let &PointVortex { strength: gamma1, position: vtx1 } = pvs[0];
-            let &PointVortex { strength: gamma2, position: vtx2 } = pvs[1];
-            gamma1 * gamma2 * u1pijk(vtx, vtx1, vtx2, sqg)
+    let nvtxs = other_vtxs.len();
+    let u1p: Vector = other_vtxs[..nvtxs - 1].iter().enumerate().map(|(i, pv1)| {
+            other_vtxs[i + 1..].iter().map(|pv2| {
+                let &PointVortex { strength: gamma1, position: vtx1 } = pv1;
+                let &PointVortex { strength: gamma2, position: vtx2 } = pv2;
+                gamma1 * gamma2 * u1pijk(vtx, vtx1, vtx2, sqg)
+            })
         })
+        .flatten()
         .sum();
     u0 + rossby * (u1s + u1p)
 }
