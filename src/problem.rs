@@ -1,14 +1,12 @@
 use crate::config::Problem;
 
-use derive_more::{Add, Sub, Sum, AddAssign};
-
 use std::f64::consts::FRAC_1_PI;
 use std::ops::Mul;
 
 #[derive(Debug, Default, Clone, Copy)]
 #[derive(serde::Deserialize)]
 #[derive(npyz::AutoSerialize, npyz::Serialize)]
-#[derive(Add, Sub, Sum, AddAssign)]
+#[derive(derive_more::Add, derive_more::Sub, derive_more::Sum)]
 pub struct Vector { pub x: f64, pub y: f64, pub z: f64 }
 
 impl Mul<Vector> for f64 {
@@ -34,6 +32,7 @@ pub struct PointVortex {
     pub position: Vector
 }
 
+#[derive(Clone)]
 pub struct State {
     pub point_vortices: Vec<PointVortex>,
     pub passive_tracers: Vec<Vector>
@@ -42,7 +41,7 @@ pub struct State {
 struct Buffer {
     other_vortices: Vec<PointVortex>,
     ks: [Vec<Vector>; 4],
-    yns: [Vec<PointVortex>; 4]
+    state: State
 }
 
 pub struct Solver {
@@ -50,7 +49,7 @@ pub struct Solver {
     sqg: bool,
     dt: f64,
     state: State,
-    buffer: Buffer,
+    buffer: Buffer
 }
 
 impl Solver {
@@ -69,10 +68,7 @@ impl Solver {
                  vec![Vector::default(); n],
                  vec![Vector::default(); n],
                  vec![Vector::default(); n]],
-            yns: [vec![PointVortex::default(); n],
-                  vec![PointVortex::default(); n],
-                  vec![PointVortex::default(); n],
-                  vec![PointVortex::default(); n]]
+            state: state.clone()
         };
         Solver { rossby, sqg, dt, state, buffer }
     }
@@ -82,25 +78,34 @@ impl Solver {
     }
 
     fn first_order_change(&mut self, i: usize) {
-        for ((j, k), &PointVortex { position, .. }) in self.buffer.ks[i].iter_mut().enumerate()
-                                                           .zip(self.state.point_vortices.iter()) {
+        let ks = &mut self.buffer.ks[i];
+        ks.clear();
+        for (j, &PointVortex { position, .. }) in self.buffer.state.point_vortices.iter().enumerate() {
             self.buffer.other_vortices.clear();
-            for &pv in self.state.point_vortices.iter()
-                           .enumerate()
-                           .filter(|&(k, _)| j != k)
-                           .map(|(_, x)| x) {
+            for &pv in self.buffer.state.point_vortices.iter()
+                                   .enumerate()
+                                   .filter(|&(k, _)| j != k)
+                                   .map(|(_, x)| x) {
                 self.buffer.other_vortices.push(pv);
             }
-            *k = ui(position, &self.buffer.other_vortices, self.rossby, self.sqg);
+            ks.push(ui(position, &self.buffer.other_vortices, self.rossby, self.sqg));
+        }
+        for &pt in self.buffer.state.passive_tracers.iter() {
+            ks.push(ui(pt, &self.buffer.state.point_vortices, self.rossby, self.sqg));
         }
     }
 
     fn euler_est(&mut self, increment: f64, i: usize) {
-        self.buffer.yns[i].clear();
+        self.buffer.state.point_vortices.clear();
         let pvs = &self.state.point_vortices;
         let mut ks = self.buffer.ks[i].iter();
         for (&PointVortex { position: yn, strength }, &k) in pvs.iter().zip(&mut ks) {
-            self.buffer.yns[i].push(PointVortex { position: yn + increment * k, strength })
+            self.buffer.state.point_vortices.push(PointVortex { position: yn + increment * k, strength })
+        }
+        let pts = &self.state.passive_tracers;
+        self.buffer.state.passive_tracers.clear();
+        for (&yn, &k) in pts.iter().zip(&mut ks) {
+            self.buffer.state.passive_tracers.push(yn + increment * k)
         }
     }
 
@@ -113,22 +118,31 @@ impl Solver {
         self.first_order_change(2);
         self.euler_est(self.dt, 2);
         self.first_order_change(3);
-        let update = |x: &mut Vector| {
-            let k1 = ui(*x, &self.state.point_vortices, self.rossby, self.sqg);
-            let k2 = ui(*x + 0.5 * self.dt * k1, &self.buffer.yns[0], self.rossby, self.sqg);
-            let k3 = ui(*x + 0.5 * self.dt * k2, &self.buffer.yns[1], self.rossby, self.sqg);
-            let k4 = ui(*x + self.dt * k3, &self.buffer.yns[2], self.rossby, self.sqg);
-            *x += self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4)
-        };
-        self.state.passive_tracers.iter_mut().for_each(update);
-        for (x, &k1, &k2, &k3, &k4) in self.state.point_vortices.iter_mut()
-                                                 .zip(self.buffer.ks[0].iter())
-                                                 .zip(self.buffer.ks[1].iter())
-                                                 .zip(self.buffer.ks[2].iter())
-                                                 .zip(self.buffer.ks[3].iter())
-                                                 .map(|((((a, b), c), d), e)| (a, b, c, d, e)) {
-            x.position += self.dt / 6. * (k1 + 2. * k2 + 2. * k3 + k4);
+        let c = 1. / 6.;
+        let mut k1s_iter = self.buffer.ks[0].iter();
+        let mut k2s_iter = self.buffer.ks[1].iter();
+        let mut k3s_iter = self.buffer.ks[2].iter();
+        let mut k4s_iter = self.buffer.ks[3].iter();
+        for (((((x_, &x), &k1), &k2), &k3), &k4) in self.buffer.state.point_vortices
+                                                          .iter_mut()
+                                                          .zip(self.state.point_vortices.iter())
+                                                          .zip(&mut k1s_iter)
+                                                          .zip(&mut k2s_iter)
+                                                          .zip(&mut k3s_iter)
+                                                          .zip(&mut k4s_iter) {
+            x_.position = x.position + c * self.dt * (k1 + 2. * k2 + 2. * k3 + k4)
         }
+        for (((((x_, &x), &k1), &k2), &k3), &k4) in self.buffer.state.passive_tracers
+                                                          .iter_mut()
+                                                          .zip(self.state.passive_tracers.iter())
+                                                          .zip(&mut k1s_iter)
+                                                          .zip(&mut k2s_iter)
+                                                          .zip(&mut k3s_iter)
+                                                          .zip(&mut k4s_iter) {
+            *x_ = x + c * self.dt * (k1 + 2. * k2 + 2. * k3 + k4)
+        }
+        self.state.point_vortices.copy_from_slice(&self.buffer.state.point_vortices);
+        self.state.passive_tracers.copy_from_slice(&self.buffer.state.passive_tracers);
     }
 }
 
