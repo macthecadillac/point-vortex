@@ -40,7 +40,7 @@ pub struct State {
 
 struct Buffer {
     other_vortices: Vec<PointVortex>,
-    ks: [Vec<Vector>; 4],
+    ks: Vec<[Vector; 4]>,
     state: State
 }
 
@@ -64,10 +64,7 @@ impl Solver {
         let n = state.point_vortices.len() + state.passive_tracers.len();
         let buffer = Buffer {
             other_vortices: vec![PointVortex::default(); state.point_vortices.len() - 1],
-            ks: [vec![Vector::default(); n],
-                 vec![Vector::default(); n],
-                 vec![Vector::default(); n],
-                 vec![Vector::default(); n]],
+            ks: vec![[Vector::default(); 4]; n],
             state: state.clone()
         };
         Solver { rossby, sqg, dt, state, buffer }
@@ -78,9 +75,10 @@ impl Solver {
     }
 
     fn first_order_change(&mut self, i: usize) {
-        let ks = &mut self.buffer.ks[i];
-        ks.clear();
-        for (j, &PointVortex { position, .. }) in self.buffer.state.point_vortices.iter().enumerate() {
+        let mut ks = self.buffer.ks.iter_mut();
+        for ((j, &PointVortex { position, .. }), k) in self.buffer.state.point_vortices.iter()
+                                                           .enumerate()
+                                                           .zip(&mut ks) {
             self.buffer.other_vortices.clear();
             for &pv in self.buffer.state.point_vortices.iter()
                                    .enumerate()
@@ -88,24 +86,24 @@ impl Solver {
                                    .map(|(_, x)| x) {
                 self.buffer.other_vortices.push(pv);
             }
-            ks.push(ui(position, &self.buffer.other_vortices, self.rossby, self.sqg));
+            k[i] = ui(position, &self.buffer.other_vortices, self.rossby, self.sqg);
         }
-        for &pt in self.buffer.state.passive_tracers.iter() {
-            ks.push(ui(pt, &self.buffer.state.point_vortices, self.rossby, self.sqg));
+        for (&pt, k) in self.buffer.state.passive_tracers.iter().zip(&mut ks) {
+            k[i] = ui(pt, &self.buffer.state.point_vortices, self.rossby, self.sqg);
         }
     }
 
     fn euler_est(&mut self, increment: f64, i: usize) {
         self.buffer.state.point_vortices.clear();
         let pvs = &self.state.point_vortices;
-        let mut ks = self.buffer.ks[i].iter();
-        for (&PointVortex { position: yn, strength }, &k) in pvs.iter().zip(&mut ks) {
-            self.buffer.state.point_vortices.push(PointVortex { position: yn + increment * k, strength })
+        let mut ks = self.buffer.ks.iter_mut();
+        for (&PointVortex { position: yn, strength }, k) in pvs.iter().zip(&mut ks) {
+            self.buffer.state.point_vortices.push(PointVortex { position: yn + increment * k[i], strength })
         }
         let pts = &self.state.passive_tracers;
         self.buffer.state.passive_tracers.clear();
-        for (&yn, &k) in pts.iter().zip(&mut ks) {
-            self.buffer.state.passive_tracers.push(yn + increment * k)
+        for (&yn, k) in pts.iter().zip(&mut ks) {
+            self.buffer.state.passive_tracers.push(yn + increment * k[i])
         }
     }
 
@@ -119,26 +117,17 @@ impl Solver {
         self.euler_est(self.dt, 2);
         self.first_order_change(3);
         let c = 1. / 6.;
-        let mut k1s_iter = self.buffer.ks[0].iter();
-        let mut k2s_iter = self.buffer.ks[1].iter();
-        let mut k3s_iter = self.buffer.ks[2].iter();
-        let mut k4s_iter = self.buffer.ks[3].iter();
-        for (((((x_, &x), &k1), &k2), &k3), &k4) in self.buffer.state.point_vortices
-                                                          .iter_mut()
-                                                          .zip(self.state.point_vortices.iter())
-                                                          .zip(&mut k1s_iter)
-                                                          .zip(&mut k2s_iter)
-                                                          .zip(&mut k3s_iter)
-                                                          .zip(&mut k4s_iter) {
+        let mut ks_iter = self.buffer.ks.iter();
+        for ((x_, &x), &[k1, k2, k3, k4]) in self.buffer.state.point_vortices
+                                                        .iter_mut()
+                                                        .zip(self.state.point_vortices.iter())
+                                                        .zip(&mut ks_iter) {
             x_.position = x.position + c * self.dt * (k1 + 2. * k2 + 2. * k3 + k4)
         }
-        for (((((x_, &x), &k1), &k2), &k3), &k4) in self.buffer.state.passive_tracers
-                                                          .iter_mut()
-                                                          .zip(self.state.passive_tracers.iter())
-                                                          .zip(&mut k1s_iter)
-                                                          .zip(&mut k2s_iter)
-                                                          .zip(&mut k3s_iter)
-                                                          .zip(&mut k4s_iter) {
+        for ((x_, &x), &[k1, k2, k3, k4]) in self.buffer.state.passive_tracers
+                                                        .iter_mut()
+                                                        .zip(self.state.passive_tracers.iter())
+                                                        .zip(&mut ks_iter) {
             *x_ = x + c * self.dt * (k1 + 2. * k2 + 2. * k3 + k4)
         }
         self.state.point_vortices.copy_from_slice(&self.buffer.state.point_vortices);
