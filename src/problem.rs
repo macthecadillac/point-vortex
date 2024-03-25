@@ -117,18 +117,19 @@ impl Solver {
         self.euler_est(self.dt, 2);
         self.first_order_change(3);
         let c = 1. / 6.;
-        let mut ks_iter = self.buffer.ks.iter();
-        for ((x_, &x), &[k1, k2, k3, k4]) in self.buffer.state.point_vortices
-                                                        .iter_mut()
-                                                        .zip(self.state.point_vortices.iter())
-                                                        .zip(&mut ks_iter) {
-            x_.position = x.position + c * self.dt * (k1 + 2. * k2 + 2. * k3 + k4)
+        let mut ks = self.buffer.ks.iter()
+                         .map(|&[k1, k2, k3, k4]| k1 + 2. * k2 + 2. * k3 + k4);
+        for ((x_, &x), k) in self.buffer.state.point_vortices
+                                 .iter_mut()
+                                 .zip(self.state.point_vortices.iter())
+                                 .zip(&mut ks) {
+            x_.position = x.position + c * self.dt * k
         }
-        for ((x_, &x), &[k1, k2, k3, k4]) in self.buffer.state.passive_tracers
-                                                        .iter_mut()
-                                                        .zip(self.state.passive_tracers.iter())
-                                                        .zip(&mut ks_iter) {
-            *x_ = x + c * self.dt * (k1 + 2. * k2 + 2. * k3 + k4)
+        for ((x_, &x), k) in self.buffer.state.passive_tracers
+                                 .iter_mut()
+                                 .zip(self.state.passive_tracers.iter())
+                                 .zip(&mut ks) {
+            *x_ = x + c * self.dt * k
         }
         self.state.point_vortices.copy_from_slice(&self.buffer.state.point_vortices);
         self.state.passive_tracers.copy_from_slice(&self.buffer.state.passive_tracers);
