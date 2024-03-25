@@ -11,6 +11,8 @@ mod config;
 mod error;
 mod problem;
 
+use main_error::MainError;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
 struct Args {
@@ -19,43 +21,46 @@ struct Args {
     nosave: bool
 }
 
-fn main() -> Result<(), main_error::MainError> {
+fn main() -> Result<(), MainError> {
     let args = Args::parse();
     let path = Path::new(&args.config);
     let problem = config::parse(&path)?;
     let niter = (problem.duration as f64 / problem.time_step).round() as usize;
     let stride = problem.write_interval.unwrap_or(1);
     let n = problem.point_vortices.len() + problem.passive_tracers.len();
+    let chunk_size = problem.chunk_size.unwrap_or(1024 * 1024);
+    let buffer_size = chunk_size / n * n;
     let nslice = niter / stride;
 
-    let mut buf = vec![];
-    let mut writer = npyz::WriteOptions::new()
-        .default_dtype()
-        .shape(&[nslice as u64, n as u64])
-        .writer(&mut buf)
-        .begin_nd()?;
+    let mut fbuf = (!args.nosave)
+        .then(|| File::create(path.with_extension("npy")).map(|f| BufWriter::new(f)))
+        .transpose()?;
+    let mut writer = fbuf.as_mut()
+        .map(|b| npyz::WriteOptions::new()
+            .default_dtype()
+            .shape(&[nslice as u64, n as u64])
+            .writer(b).begin_nd())
+        .transpose()?;
 
-    for pv in problem.point_vortices.iter() {
-        writer.push(&pv.position)?;
-    }
+    writer.as_mut().map(|w| w.extend(problem.point_vortices.iter().map(|&pv| pv.position))).transpose()?;
+    writer.as_mut().map(|w| w.extend(problem.passive_tracers.iter().cloned())).transpose()?;
 
-    for tracer in problem.passive_tracers.iter() {
-        writer.push(&tracer)?;
-    }
+    let mut mbuf = Vec::new();
+    mbuf.reserve_exact(buffer_size);
 
     let mut solver = problem::Solver::new(&problem);
-    let mut threshold = 1.;
+    let mut threshold = 0.;
     print!("0.0% complete\r");
     io::stdout().flush().unwrap();
     for i in 1..niter {
         solver.step();
         if i % stride == 0 {
-            for pv in solver.state().point_vortices.iter() {
-                writer.push(&pv.position)?;
-            }
-            for pt in solver.state().passive_tracers.iter() {
-                writer.push(&pt)?;
-            }
+            mbuf.extend(solver.state().point_vortices.iter().map(|&pv| pv.position));
+            mbuf.extend(&solver.state().passive_tracers);
+        }
+        if mbuf.len() == buffer_size {
+            let data = mbuf.drain(..);
+            writer.as_mut().map(|w| w.extend(data)).transpose()?;
         }
         let niter_f64 = niter as f64;
         let i_f64 = i as f64;
@@ -67,13 +72,7 @@ fn main() -> Result<(), main_error::MainError> {
             io::stdout().flush().unwrap();
         }
     }
-    writer.finish()?;
-
-    if !args.nosave {
-        let file = File::create(path.with_extension("npy"))?;
-        let mut writer = BufWriter::new(file);
-        writer.write(&buf)?;
-    }
-
+    writer.as_mut().map(|w| w.extend(mbuf.drain(..))).transpose()?;
+    writer.map(|w| w.finish()).transpose()?;
     Ok(())
 }
