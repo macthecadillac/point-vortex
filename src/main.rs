@@ -42,20 +42,22 @@ impl Progress {
     fn new(niter: usize) -> Self {
         print!("0.0% complete\r");
         io::stdout().flush().unwrap();
-        Progress { threshold: 0., niter, step: 0 }
+        Progress { threshold: 0., niter, step: 1 }
     }
 
-    fn report(&mut self) {
-        self.step += 1;
-        let niter_f64 = self.niter as f64;
-        let step_f64 = self.step as f64;
-        let percent_done = (step_f64 + 1.) * 100. / niter_f64;
-        let hundredths = (percent_done * 10.).floor();
-        if hundredths > self.threshold {
-            self.threshold = hundredths;
-            print!("{:.1}% complete\r", percent_done);
-            io::stdout().flush().unwrap();
+    fn step(&mut self, stdout: bool) {
+        if stdout {
+            let niter_f64 = self.niter as f64;
+            let step_f64 = self.step as f64;
+            let percent_done = (step_f64 + 1.) * 100. / niter_f64;
+            let hundredths = (percent_done * 10.).floor();
+            if hundredths > self.threshold {
+                self.threshold = hundredths;
+                print!("{:.1}% complete\r", percent_done);
+                io::stdout().flush().unwrap();
+            }
         }
+        self.step += 1;
     }
 }
 
@@ -107,8 +109,8 @@ fn main() -> Result<(), MainError> {
     let args = Args::parse();
     let path = Path::new(&args.config);
     let problem = config::parse(&path)?;
-    let niter = (problem.duration as f64 / problem.time_step).round() as usize;
     let stride = problem.write_interval.unwrap_or(1);
+    let niter = (problem.duration as f64 / problem.time_step).round() as usize / stride * stride;
     let npv = problem.point_vortices.len();
     let npt = problem.passive_tracers.len();
     let n = npv + npt;
@@ -148,7 +150,7 @@ fn main() -> Result<(), MainError> {
                 let data = mbuf.drain(..);
                 writer.as_mut().map(|w| w.extend(data)).transpose()?;
             }
-            progress.report();
+            progress.step(true);
         }
         writer.as_mut().map(|w| w.extend(mbuf.drain(..))).transpose()?;
     } else {
@@ -170,15 +172,14 @@ fn main() -> Result<(), MainError> {
                 .zip(progress.par_iter_mut())
                 .enumerate()
                 .map(|(n, ((mbuf, solver), progress))| {
-                    for step in ((i == 0) as usize)..buffer_niter {
-                        let total_steps = i * buffer_niter + step;
-                        if total_steps >= niter { break }
+                    for _ in ((i == 0) as usize)..buffer_niter {
+                        if progress.step >= niter { break }
                         solver.step();
-                        if n == 0 { progress.report() }
-                        if total_steps % stride == 0 {
+                        if progress.step % stride == 0 {
                             mbuf.extend(solver.state().point_vortices.iter().map(|&pv| pv.position));
                             mbuf.extend(&solver.state().passive_tracers);
                         }
+                        progress.step(n == 0);
                     }
                     (n, &mut mbuf[..])
                 })
