@@ -9,8 +9,10 @@ pub(crate) enum Error {
     IOError(#[source] std::io::Error),
     #[error(display = "")]
     TOMLError(#[source] toml::de::Error),
-    #[error(display = "number of passive tracers not divisible by the number of threads")]
+    #[error(display = "Number of passive tracers not divisible by the number of threads")]
     NThreadsError,
-    #[error(display = "")]
-    TryForEachBreak
+    #[error(display = "Range start {} is greater than range end {}", _0, _1)]
+    InvertedRange(f64, f64),
+    #[error(display = "Empty range. Note that n must be greater than or equal to 2.")]
+    EmptyRange,
 }
