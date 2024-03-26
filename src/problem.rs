@@ -49,7 +49,9 @@ pub struct Solver {
     sqg: bool,
     dt: f64,
     state: State,
-    buffer: Buffer
+    buffer: Buffer,
+    pub npv: usize,
+    pub npt: usize
 }
 
 impl Solver {
@@ -67,7 +69,9 @@ impl Solver {
             ks: vec![[Vector::default(); 4]; n],
             state: state.clone()
         };
-        Solver { rossby, sqg, dt, state, buffer }
+        let npv = problem.npv();
+        let npt = problem.npt();
+        Solver { rossby, sqg, dt, state, buffer, npv, npt }
     }
 
     pub fn state(&self) -> &State {

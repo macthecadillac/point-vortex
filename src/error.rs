@@ -9,4 +9,8 @@ pub enum Error {
     IOError(#[source] std::io::Error),
     #[error(display = "")]
     TOMLError(#[source] toml::de::Error),
+    #[error(display = "number of passive tracers not divisible by the number of threads")]
+    NThreadsError,
+    #[error(display = "")]
+    TryForEachBreak
 }
