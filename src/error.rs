@@ -15,4 +15,6 @@ pub(crate) enum Error {
     InvertedRange(f64, f64),
     #[error(display = "Empty range. Note that n must be greater than or equal to 2.")]
     EmptyRange,
+    #[error(display = "")]
+    TimeError(#[source] std::time::SystemTimeError),
 }

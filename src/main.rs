@@ -1,3 +1,4 @@
+use chrono::{DateTime, Local};
 use clap::Parser;
 use npyz::WriterBuilder;
 use rayon::prelude::*;
@@ -35,14 +36,16 @@ struct Args {
 struct Progress {
     threshold: f64,
     niter: usize,
-    step: usize
+    step: usize,
+    start_time: DateTime<Local>
 }
 
 impl Progress {
     fn new(niter: usize) -> Self {
         print!("0.0% complete\r");
         io::stdout().flush().unwrap();
-        Progress { threshold: 0., niter, step: 1 }
+        let start_time = Local::now();
+        Progress { threshold: 0., step: 1, niter, start_time }
     }
 
     fn step(&mut self, stdout: bool) {
@@ -53,7 +56,13 @@ impl Progress {
             let hundredths = (percent_done * 10.).floor();
             if hundredths > self.threshold {
                 self.threshold = hundredths;
-                print!("{:.1}% complete\r", percent_done);
+                let now = Local::now();
+                let elapsed_time = now - self.start_time;
+                let unit_time = elapsed_time / (percent_done * 100.).round() as i32;
+                let time_left = unit_time * ((100. - percent_done) * 100.).round() as i32;
+                let eta = now + time_left;
+                print!("{:.1}% complete. Estimated completion time: {}\r",
+                       percent_done, eta.format("%m-%d-%Y %H:%M:%S"));
                 io::stdout().flush().unwrap();
             }
         }
@@ -121,6 +130,8 @@ fn main() -> Result<(), MainError> {
     let buf_size_per_step = buf_size_per_thread_per_step * nthreads;
     let buffer_size = chunk_size / buf_size_per_step * buf_size_per_step;
     let nslice = niter / stride;
+    let start_time = Local::now();
+    println!("Run started at {}", start_time.format("%m-%d-%Y %H:%M:%S"));
 
     let mut fbuf = (!args.nosave)
         .then(|| File::create(path.with_extension("npy")).map(|f| BufWriter::new(f)))
