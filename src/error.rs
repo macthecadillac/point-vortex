@@ -2,7 +2,7 @@ use err_derive::Error;
 
 #[derive(Debug, Error)]
 #[allow(dead_code)]
-pub enum Error {
+pub(crate) enum Error {
     #[error(display = "")]
     MissingConfig,
     #[error(display = "")]

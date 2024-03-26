@@ -7,7 +7,7 @@ use std::ops::Mul;
 #[derive(serde::Deserialize)]
 #[derive(npyz::AutoSerialize, npyz::Serialize)]
 #[derive(derive_more::Add, derive_more::Sub, derive_more::Sum)]
-pub struct Vector { pub x: f64, pub y: f64, pub z: f64 }
+pub(crate) struct Vector { pub(crate) x: f64, pub(crate) y: f64, pub(crate) z: f64 }
 
 impl Mul<Vector> for f64 {
     type Output = Vector;
@@ -27,15 +27,15 @@ impl Vector {
 }
 
 #[derive(serde::Deserialize, Copy, Clone, Default)]
-pub struct PointVortex {
-    pub strength: f64,
-    pub position: Vector
+pub(crate) struct PointVortex {
+    pub(crate) strength: f64,
+    pub(crate) position: Vector
 }
 
 #[derive(Clone)]
-pub struct State {
-    pub point_vortices: Vec<PointVortex>,
-    pub passive_tracers: Vec<Vector>
+pub(crate) struct State {
+    pub(crate) point_vortices: Vec<PointVortex>,
+    pub(crate) passive_tracers: Vec<Vector>
 }
 
 struct Buffer {
@@ -44,18 +44,16 @@ struct Buffer {
     state: State
 }
 
-pub struct Solver {
+pub(crate) struct Solver {
     rossby: f64,
     sqg: bool,
     dt: f64,
     state: State,
-    buffer: Buffer,
-    pub npv: usize,
-    pub npt: usize
+    buffer: Buffer
 }
 
 impl Solver {
-    pub fn new(problem: &Problem) -> Self {
+    pub(crate) fn new(problem: &Problem) -> Self {
         let rossby = problem.rossby;
         let dt = problem.time_step;
         let sqg = problem.sqg;
@@ -69,12 +67,10 @@ impl Solver {
             ks: vec![[Vector::default(); 4]; n],
             state: state.clone()
         };
-        let npv = problem.npv();
-        let npt = problem.npt();
-        Solver { rossby, sqg, dt, state, buffer, npv, npt }
+        Solver { rossby, sqg, dt, state, buffer }
     }
 
-    pub fn state(&self) -> &State {
+    pub(crate) fn state(&self) -> &State {
         &self.state
     }
 
@@ -112,7 +108,7 @@ impl Solver {
     }
 
     // Classic Runge-Kutta method
-    pub fn step(&mut self) {
+    pub(crate) fn step(&mut self) {
         self.first_order_change(0);
         self.euler_est(0.5 * self.dt, 0);
         self.first_order_change(1);

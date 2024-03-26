@@ -7,6 +7,7 @@ use std::io;
 use std::io::prelude::*;
 use std::io::BufWriter;
 use std::path::Path;
+use std::slice;
 
 mod config;
 mod error;
@@ -39,6 +40,8 @@ struct Progress {
 
 impl Progress {
     fn new(niter: usize) -> Self {
+        print!("0.0% complete\r");
+        io::stdout().flush().unwrap();
         Progress { threshold: 0., niter, step: 0 }
     }
 
@@ -53,6 +56,50 @@ impl Progress {
             print!("{:.1}% complete\r", percent_done);
             io::stdout().flush().unwrap();
         }
+    }
+}
+
+struct MultiBufferData<'a, T> {
+    npv: usize,
+    data: Vec<(usize, slice::Chunks<'a, T>)>
+}
+
+impl<'a, T> MultiBufferData<'a, T> {
+    fn from(v: &'a mut [(usize, &'a mut [T])], npv: usize, step_size: usize) -> Self {
+        let data = v.iter_mut().map(|(n, buf)| (*n, buf.chunks(step_size))).collect();
+        MultiBufferData { npv, data }
+    }
+}
+
+struct MultiBufferChunksIter<'a, T> {
+    index: usize,
+    npv: usize,
+    data: &'a mut [(usize, slice::Chunks<'a, T>)]
+}
+
+impl<'a, T: Clone> MultiBufferData<'a, T> {
+    fn chunks(&'a mut self) -> MultiBufferChunksIter<'a, T> {
+        MultiBufferChunksIter {
+            index: self.data.len() - 1,
+            npv: self.npv,
+            data: self.data.as_mut_slice()
+        }
+    }
+
+    fn iter(&'a mut self) -> impl Iterator<Item=T> + 'a {
+        self.chunks().flat_map(|iter| iter.iter().cloned())
+    }
+}
+
+impl<'a, T> Iterator for MultiBufferChunksIter<'a, T> {
+    type Item = &'a [T];
+    fn next(&mut self) -> Option<Self::Item> {
+        self.index = (self.index + 1) % self.data.len();
+        self.data
+            .get_mut(self.index)
+            .as_mut()
+            .and_then(|(n, chunks)| chunks.next().as_ref()
+                                          .map(|&chunk| if *n == 0 { chunk } else { &chunk[self.npv..] }))
     }
 }
 
@@ -90,10 +137,7 @@ fn main() -> Result<(), MainError> {
         let mut mbuf = Vec::new();
         mbuf.reserve_exact(buffer_size);
         let mut solver = problem::Solver::new(&problem);
-        // let mut threshold = 0.;
         let mut progress = Progress::new(niter);
-        print!("0.0% complete\r");
-        io::stdout().flush().unwrap();
         for i in 1..niter {
             solver.step();
             if i % stride == 0 {
@@ -136,29 +180,13 @@ fn main() -> Result<(), MainError> {
                             mbuf.extend(&solver.state().passive_tracers);
                         }
                     }
-                    (n, mbuf)
+                    (n, &mut mbuf[..])
                 })
                 .collect();
-            bufs.sort_by(|(a, _), (b, _)| a.cmp(b));
             let step_size = npv + npt / nthreads;
-            let mut chunked: Vec<_> = bufs.iter_mut().map(|(n, buf)| (*n, buf.chunks(step_size))).collect();
-            loop {
-                let mut br = false;
-                for (n, ref mut chunks) in chunked.iter_mut() {
-                    if let Some(chunk) = chunks.next() {
-                        if *n == 0 {
-                            writer.as_mut().map(|w| w.extend(chunk.iter().cloned())).transpose()?;
-                        } else {
-                            writer.as_mut().map(|w| w.extend(chunk[npv..].iter().cloned())).transpose()?;
-                        }
-                    } else {
-                        br = true;
-                        break
-                    }
-                }
-                if br { break }
-            };
-            for (_, buf) in bufs.iter_mut() { buf.clear(); }
+            let mut data_stream = MultiBufferData::from(&mut bufs[..], npv, step_size);
+            writer.as_mut().map(|w| w.extend(data_stream.iter())).transpose()?;
+            for buf in mbufs.iter_mut() { buf.clear(); }
         }
     }
     writer.map(|w| w.finish()).transpose()?;
