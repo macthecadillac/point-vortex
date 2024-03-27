@@ -124,7 +124,7 @@ fn main() -> Result<(), MainError> {
     let npt = problem.passive_tracers.len();
     let n = npv + npt;
     let nthreads = args.nthreads.unwrap_or(1);
-    let chunk_size = args.buffer_size.unwrap_or(72 * 1024 * 1024) / 3;
+    let chunk_size = args.buffer_size.unwrap_or(72 * 1024 * 1024) / 24;
     if npt % nthreads > 0 { Err(error::Error::NThreadsError)? }
     let buf_size_per_thread_per_step = npv + npt / nthreads;
     let buf_size_per_step = buf_size_per_thread_per_step * nthreads;
@@ -156,10 +156,10 @@ fn main() -> Result<(), MainError> {
             if i % stride == 0 {
                 mbuf.extend(solver.state().point_vortices.iter().map(|&pv| pv.position));
                 mbuf.extend(&solver.state().passive_tracers);
-            }
-            if mbuf.len() == buffer_size {
-                let data = mbuf.drain(..);
-                writer.as_mut().map(|w| w.extend(data)).transpose()?;
+                if mbuf.len() == buffer_size {
+                    let data = mbuf.drain(..);
+                    writer.as_mut().map(|w| w.extend(data)).transpose()?;
+                }
             }
             progress.step(true);
         }
@@ -175,7 +175,7 @@ fn main() -> Result<(), MainError> {
             solvers.push(problem::Solver::new(&p));
         }
         let mut progress = vec![Progress::new(niter); nthreads];
-        let buffer_niter = buf_size_per_thread / buf_size_per_thread_per_step;
+        let buffer_niter = buf_size_per_thread / buf_size_per_thread_per_step * stride;
         let n_segments = (niter + buffer_niter - 2) / buffer_niter;
         for i in 0..n_segments {
             let mut bufs: Vec<_> = mbufs.par_iter_mut()
