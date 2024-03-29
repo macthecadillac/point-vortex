@@ -7,33 +7,73 @@ use std::path::Path;
 
 use crate::problem::{PointVortex, Vector};
 
-#[derive(Deserialize)]
-#[serde(untagged)]
-enum PointOrRange { Point(f64), Range { start: f64, end: f64, n: usize } }
+#[derive(Copy, Clone, Deserialize)]
+struct Range { start: f64, end: f64, n: usize }
 
-impl TryFrom<PointOrRange> for Vec<f64> {
-    type Error = crate::error::Error;
-    fn try_from(pr: PointOrRange) -> Result<Vec<f64>, Self::Error> {
+#[derive(Clone, Copy)]
+struct RangeIter { start: f64, step_size: f64, n: usize }
+
+impl Iterator for RangeIter {
+    type Item = f64;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.n == 0 {
+            None
+        } else {
+            let curr = self.start;
+            self.start += self.step_size;
+            self.n -= 1;
+            Some(curr)
+        }
+    }
+}
+
+impl Range {
+    fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
         use crate::error::Error;
-        match pr {
-            PointOrRange::Range { n, .. } if n < 2 => Err(Error::EmptyRange),
-            PointOrRange::Range { start, end, .. } if start > end => Err(Error::InvertedRange(start, end)),
-            PointOrRange::Range { start, end, n } => {
+        match self {
+            Range { n, .. } if n < 2 => Err(Error::EmptyRange),
+            Range { start, end, .. } if start > end => Err(Error::InvertedRange(start, end)),
+            Range { start, end, n } => {
                 let span = end - start;
-                let stride = span / (n - 1) as f64;
-                Ok((0..n).map(|m| start + m as f64 * stride).collect())
+                let step_size = span / (n - 1) as f64;
+                Ok(RangeIter { start, n, step_size })
             },
-            PointOrRange::Point(p) => Ok(vec![p])
+        }
+    }
+}
+
+#[derive(Copy, Clone, Deserialize)]
+#[serde(untagged)]
+enum PointOrRange { Point(f64), Range(Range) }
+
+impl PointOrRange {
+    fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
+        match self {
+            PointOrRange::Range(r) => Ok(r.try_into_iter()?),
+            PointOrRange::Point(p) => Ok(RangeIter { start: p, n: 1, step_size: 1. })
         }
     }
 }
 
 #[derive(Deserialize)]
-#[serde(untagged)]
-enum GridOrList {
-    Grid { xs: PointOrRange, ys: PointOrRange, zs: PointOrRange },
-    List(Vec<Vector>)
+struct Grid { xs: PointOrRange, ys: PointOrRange, zs: PointOrRange }
+
+impl Grid {
+    fn try_into_iter(self) -> Result<impl Iterator<Item=Vector>, crate::error::Error> {
+        let Grid { xs, ys, zs } = self;
+        let xiter = xs.try_into_iter()?;
+        let yiter = ys.try_into_iter()?;
+        let ziter = zs.try_into_iter()?;
+        Ok(xiter.flat_map(move |x| yiter.flat_map(move |y| ziter.map(move |z| Vector { x, y, z }))))
+    }
 }
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum GridOrVector { Grid(Grid), Vector(Vector) }
+
+#[derive(Deserialize)]
+struct GridOrVectors(Vec<GridOrVector>);
 
 #[derive(Deserialize)]
 #[derive(Clone)]
@@ -50,23 +90,18 @@ pub(crate) struct Problem {
 
 fn deserialize_tracers<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
     where D: Deserializer<'de>, {
-    match GridOrList::deserialize(deserializer).map_err(D::Error::custom)? {
-        GridOrList::List(l) => Ok(l),
-        GridOrList::Grid { xs, ys, zs } => {
-            let xpoints: Vec<f64> = xs.try_into().map_err(D::Error::custom)?;
-            let ypoints: Vec<f64> = ys.try_into().map_err(D::Error::custom)?;
-            let zpoints: Vec<f64> = zs.try_into().map_err(D::Error::custom)?;
-            let mut vs = vec![];
-            for &x in xpoints.iter() {
-                for &y in ypoints.iter() {
-                    for &z in zpoints.iter() {
-                        vs.push(Vector { x, y, z })
-                    }
-                }
+    let GridOrVectors(pts) =  GridOrVectors::deserialize(deserializer).map_err(D::Error::custom)?;
+    let mut tracers = vec![];
+    for pt in pts.into_iter() {
+        match pt {
+            GridOrVector::Vector(v) => tracers.push(v),
+            GridOrVector::Grid(grid) => {
+                let iter = grid.try_into_iter().map_err(D::Error::custom)?;
+                tracers.extend(iter);
             }
-            Ok(vs)
         }
     }
+    Ok(tracers)
 }
 
 impl Problem {
@@ -74,10 +109,7 @@ impl Problem {
         let npt = self.passive_tracers.len();
         let chunk_size = (npt + n - 1) / n;
         self.passive_tracers.chunks(chunk_size)
-            .map(|chunk| {
-                Self { passive_tracers: chunk.to_owned(),
-                       ..self.clone() }
-            })
+            .map(|chunk| Self { passive_tracers: chunk.to_owned(), ..self.clone() })
     }
 }
 
