@@ -1,21 +1,16 @@
-[package]
+[workspace]
+members = ["pv", "ftle", "lib"]
+default-members = ["pv", "ftle"]
+resolver = "2"
+
+[workspace.package]
 authors = ["Mac Lee <mal004@ucsd.edu>"]
-name = "pv"
-version = "0.1.0"
+version = "0.2.0"
+description = "Study point vortex dynamics under SQG+"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-[dependencies]
-clap = { version = "4.2", features = ["derive"]}
-err-derive = "0.3"
-derive_more = "0.99"
-npyz = { version = "0.8", features = ["derive"]}
-serde = { version = "1.0", features = ["serde_derive"] }
-toml = "0.7"
-main_error = "0.1.2"
-rayon = "1.10.0"
-chrono = "0.4.35"
-
 [profile.release]
+strip = "symbols"
 lto = true
+codegen-units = 1
+incremental = false

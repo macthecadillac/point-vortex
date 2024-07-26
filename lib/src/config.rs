@@ -77,15 +77,15 @@ struct GridOrVectors(Vec<GridOrVector>);
 
 #[derive(Deserialize)]
 #[derive(Clone)]
-pub(crate) struct Problem {
-    pub(crate) sqg: bool,
-    pub(crate) rossby: f64,
-    pub(crate) duration: f64,
-    pub(crate) time_step: f64,
-    pub(crate) point_vortices: Vec<PointVortex>,
+pub struct Problem {
+    pub sqg: bool,
+    pub rossby: f64,
+    pub duration: f64,
+    pub time_step: f64,
+    pub point_vortices: Vec<PointVortex>,
     #[serde(deserialize_with = "deserialize_tracers")]
-    pub(crate) passive_tracers: Vec<Vector>,
-    pub(crate) write_interval: Option<usize>,
+    pub passive_tracers: Vec<Vector>,
+    pub write_interval: Option<usize>,
 }
 
 fn deserialize_tracers<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
@@ -105,7 +105,7 @@ fn deserialize_tracers<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
 }
 
 impl Problem {
-    pub(crate) fn divide(&self, n: usize) -> impl Iterator<Item=Self> + '_ {
+    pub fn divide(&self, n: usize) -> impl Iterator<Item=Self> + '_ {
         let npt = self.passive_tracers.len();
         let chunk_size = (npt + n - 1) / n;
         self.passive_tracers.chunks(chunk_size)
@@ -113,7 +113,7 @@ impl Problem {
     }
 }
 
-pub(crate) fn parse(path: &Path) -> Result<Problem, crate::error::Error> {
+pub fn parse(path: &Path) -> Result<Problem, crate::error::Error> {
     let mut file = File::open(&path)?;
     let mut toml_file = String::new();
     file.read_to_string(&mut toml_file)?;

@@ -1,0 +1,16 @@
+[package]
+name = "lib"
+version.workspace = true
+authors.workspace = true
+description.workspace = true
+edition.workspace = true
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+err-derive = "0.3"
+derive_more = "0.99"
+npyz = { version = "0.8", features = ["derive"]}
+serde = { version = "1.0", features = ["serde_derive"] }
+toml = "0.7"
+chrono = "0.4.35"

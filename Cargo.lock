@@ -270,6 +270,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ftle"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "lib",
+ "main_error",
+ "npyz",
+ "rayon",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -331,6 +343,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "29c15563dc2726973df627357ce0c9ddddbea194836909d655df6a75d2cf296d"
 dependencies = [
  "wasm-bindgen",
+]
+
+[[package]]
+name = "lib"
+version = "0.2.0"
+dependencies = [
+ "chrono",
+ "derive_more",
+ "err-derive",
+ "npyz",
+ "serde",
+ "toml",
 ]
 
 [[package]]
@@ -504,17 +528,14 @@ dependencies = [
 
 [[package]]
 name = "pv"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "clap",
- "derive_more",
- "err-derive",
+ "lib",
  "main_error",
  "npyz",
  "rayon",
- "serde",
- "toml",
 ]
 
 [[package]]

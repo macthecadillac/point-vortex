@@ -1,18 +1,16 @@
-use chrono::{DateTime, Local};
+use chrono::Local;
 use clap::Parser;
 use npyz::WriterBuilder;
 use rayon::prelude::*;
 
 use std::fs::File;
-use std::io;
-use std::io::prelude::*;
 use std::io::BufWriter;
 use std::path::Path;
 use std::slice;
 
-mod config;
-mod error;
-mod problem;
+use lib::config;
+use lib::error;
+use lib::problem;
 
 use main_error::MainError;
 
@@ -30,44 +28,6 @@ struct Args {
     #[arg(long)]
     /// Number of threads. Runs in single-threaded mode if not provided
     nthreads: Option<usize>
-}
-
-#[derive(Clone, Copy)]
-struct Progress {
-    threshold: f64,
-    niter: usize,
-    step: usize,
-    start_time: DateTime<Local>
-}
-
-impl Progress {
-    fn new(niter: usize) -> Self {
-        print!("0.0% complete\r");
-        io::stdout().flush().unwrap();
-        let start_time = Local::now();
-        Progress { threshold: 0., step: 1, niter, start_time }
-    }
-
-    fn step(&mut self, stdout: bool) {
-        if stdout {
-            let niter_f64 = self.niter as f64;
-            let step_f64 = self.step as f64;
-            let percent_done = (step_f64 + 1.) * 100. / niter_f64;
-            let hundredths = (percent_done * 10.).floor();
-            if hundredths > self.threshold {
-                self.threshold = hundredths;
-                let now = Local::now();
-                let elapsed_time = now - self.start_time;
-                let unit_time = elapsed_time / (percent_done * 100.).round() as i32;
-                let time_left = unit_time * ((100. - percent_done) * 100.).round() as i32;
-                let eta = now + time_left;
-                print!("{:.1}% complete. Estimated completion time: {}\r",
-                       percent_done, eta.format("%m-%d-%Y %H:%M:%S"));
-                io::stdout().flush().unwrap();
-            }
-        }
-        self.step += 1;
-    }
 }
 
 struct MultiBufferData<'a, T> {
@@ -150,7 +110,7 @@ fn main() -> Result<(), MainError> {
         let mut mbuf = Vec::new();
         mbuf.reserve_exact(buffer_size);
         let mut solver = problem::Solver::new(&problem);
-        let mut progress = Progress::new(niter);
+        let mut progress = lib::Progress::new(niter);
         for i in 1..niter {
             solver.step();
             if i % stride == 0 {
@@ -174,7 +134,7 @@ fn main() -> Result<(), MainError> {
         for p in problem.divide(nthreads) {
             solvers.push(problem::Solver::new(&p));
         }
-        let mut progress = vec![Progress::new(niter); nthreads];
+        let mut progress = vec![lib::Progress::new(niter); nthreads];
         let buffer_niter = buf_size_per_thread / buf_size_per_thread_per_step * stride;
         let n_segments = (niter + buffer_niter - 2) / buffer_niter;
         for i in 0..n_segments {

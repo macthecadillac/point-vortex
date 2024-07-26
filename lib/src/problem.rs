@@ -7,7 +7,7 @@ use std::ops::Mul;
 #[derive(serde::Deserialize)]
 #[derive(npyz::AutoSerialize, npyz::Serialize)]
 #[derive(derive_more::Add, derive_more::Sub, derive_more::Sum)]
-pub(crate) struct Vector { pub(crate) x: f64, pub(crate) y: f64, pub(crate) z: f64 }
+pub struct Vector { pub(crate) x: f64, pub(crate) y: f64, pub(crate) z: f64 }
 
 impl Mul<Vector> for f64 {
     type Output = Vector;
@@ -27,15 +27,15 @@ impl Vector {
 }
 
 #[derive(serde::Deserialize, Copy, Clone, Default)]
-pub(crate) struct PointVortex {
-    pub(crate) strength: f64,
-    pub(crate) position: Vector
+pub struct PointVortex {
+    pub strength: f64,
+    pub position: Vector
 }
 
 #[derive(Clone)]
-pub(crate) struct State {
-    pub(crate) point_vortices: Vec<PointVortex>,
-    pub(crate) passive_tracers: Vec<Vector>
+pub struct State {
+    pub point_vortices: Vec<PointVortex>,
+    pub passive_tracers: Vec<Vector>
 }
 
 struct Buffer {
@@ -44,7 +44,7 @@ struct Buffer {
     state: State
 }
 
-pub(crate) struct Solver {
+pub struct Solver {
     rossby: f64,
     sqg: bool,
     dt: f64,
@@ -53,7 +53,7 @@ pub(crate) struct Solver {
 }
 
 impl Solver {
-    pub(crate) fn new(problem: &Problem) -> Self {
+    pub fn new(problem: &Problem) -> Self {
         let rossby = problem.rossby;
         let dt = problem.time_step;
         let sqg = problem.sqg;
@@ -70,7 +70,7 @@ impl Solver {
         Solver { rossby, sqg, dt, state, buffer }
     }
 
-    pub(crate) fn state(&self) -> &State {
+    pub fn state(&self) -> &State {
         &self.state
     }
 
@@ -108,7 +108,7 @@ impl Solver {
     }
 
     // Classic Runge-Kutta method
-    pub(crate) fn step(&mut self) {
+    pub fn step(&mut self) {
         self.first_order_change(0);
         self.euler_est(0.5 * self.dt, 0);
         self.first_order_change(1);
