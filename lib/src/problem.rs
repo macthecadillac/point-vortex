@@ -1,7 +1,14 @@
-use crate::config::Problem;
-
 use std::f64::consts::FRAC_1_PI;
 use std::ops::Mul;
+
+pub trait Problem {
+    fn sqg(&self) -> bool;
+    fn rossby(&self) -> f64;
+    fn duration(&self) -> f64;
+    fn time_step(&self) -> f64;
+    fn point_vortices(&self) -> &[PointVortex];
+    fn passive_tracers(&self) -> &[Vector];
+}
 
 #[derive(Debug, Default, Clone, Copy)]
 #[derive(serde::Deserialize)]
@@ -53,13 +60,13 @@ pub struct Solver {
 }
 
 impl Solver {
-    pub fn new(problem: &Problem) -> Self {
-        let rossby = problem.rossby;
-        let dt = problem.time_step;
-        let sqg = problem.sqg;
+    pub fn new(problem: &impl Problem) -> Self {
+        let rossby = problem.rossby();
+        let dt = problem.time_step();
+        let sqg = problem.sqg();
         let state = State {
-            point_vortices: problem.point_vortices.clone(),
-            passive_tracers: problem.passive_tracers.clone()
+            point_vortices: problem.point_vortices().to_owned(),
+            passive_tracers: problem.passive_tracers().to_owned()
         };
         let n = state.point_vortices.len() + state.passive_tracers.len();
         let buffer = Buffer {

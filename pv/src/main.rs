@@ -8,11 +8,12 @@ use std::io::BufWriter;
 use std::path::Path;
 use std::slice;
 
-use lib::config;
 use lib::error;
 use lib::problem;
 
 use main_error::MainError;
+
+mod config;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]

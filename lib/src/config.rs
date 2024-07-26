@@ -1,17 +1,13 @@
 use serde::{Deserialize, Deserializer};
 use serde::de::Error;
 
-use std::fs::File;
-use std::io::prelude::*;
-use std::path::Path;
-
-use crate::problem::{PointVortex, Vector};
+use crate::problem::Vector;
 
 #[derive(Copy, Clone, Deserialize)]
-struct Range { start: f64, end: f64, n: usize }
+pub struct Range { start: f64, end: f64, n: usize }
 
 #[derive(Clone, Copy)]
-struct RangeIter { start: f64, step_size: f64, n: usize }
+pub struct RangeIter { start: f64, step_size: f64, n: usize }
 
 impl Iterator for RangeIter {
     type Item = f64;
@@ -28,7 +24,7 @@ impl Iterator for RangeIter {
 }
 
 impl Range {
-    fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
+    pub fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
         use crate::error::Error;
         match self {
             Range { n, .. } if n < 2 => Err(Error::EmptyRange),
@@ -44,10 +40,10 @@ impl Range {
 
 #[derive(Copy, Clone, Deserialize)]
 #[serde(untagged)]
-enum PointOrRange { Point(f64), Range(Range) }
+pub enum PointOrRange { Point(f64), Range(Range) }
 
 impl PointOrRange {
-    fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
+    pub fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
         match self {
             PointOrRange::Range(r) => Ok(r.try_into_iter()?),
             PointOrRange::Point(p) => Ok(RangeIter { start: p, n: 1, step_size: 1. })
@@ -56,10 +52,10 @@ impl PointOrRange {
 }
 
 #[derive(Deserialize)]
-struct Grid { xs: PointOrRange, ys: PointOrRange, zs: PointOrRange }
+pub struct Grid { xs: PointOrRange, ys: PointOrRange, zs: PointOrRange }
 
 impl Grid {
-    fn try_into_iter(self) -> Result<impl Iterator<Item=Vector>, crate::error::Error> {
+    pub fn try_into_iter(self) -> Result<impl Iterator<Item=Vector>, crate::error::Error> {
         let Grid { xs, ys, zs } = self;
         let xiter = xs.try_into_iter()?;
         let yiter = ys.try_into_iter()?;
@@ -70,25 +66,12 @@ impl Grid {
 
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum GridOrVector { Grid(Grid), Vector(Vector) }
+pub enum GridOrVector { Grid(Grid), Vector(Vector) }
 
 #[derive(Deserialize)]
-struct GridOrVectors(Vec<GridOrVector>);
+pub struct GridOrVectors(Vec<GridOrVector>);
 
-#[derive(Deserialize)]
-#[derive(Clone)]
-pub struct Problem {
-    pub sqg: bool,
-    pub rossby: f64,
-    pub duration: f64,
-    pub time_step: f64,
-    pub point_vortices: Vec<PointVortex>,
-    #[serde(deserialize_with = "deserialize_tracers")]
-    pub passive_tracers: Vec<Vector>,
-    pub write_interval: Option<usize>,
-}
-
-fn deserialize_tracers<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
+pub fn deserialize_tracers<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
     where D: Deserializer<'de>, {
     let GridOrVectors(pts) =  GridOrVectors::deserialize(deserializer).map_err(D::Error::custom)?;
     let mut tracers = vec![];
@@ -102,22 +85,4 @@ fn deserialize_tracers<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
         }
     }
     Ok(tracers)
-}
-
-impl Problem {
-    pub fn divide(&self, n: usize) -> impl Iterator<Item=Self> + '_ {
-        let npt = self.passive_tracers.len();
-        let chunk_size = (npt + n - 1) / n;
-        self.passive_tracers.chunks(chunk_size)
-            .map(|chunk| Self { passive_tracers: chunk.to_owned(), ..self.clone() })
-    }
-}
-
-pub fn parse(path: &Path) -> Result<Problem, crate::error::Error> {
-    let mut file = File::open(&path)?;
-    let mut toml_file = String::new();
-    file.read_to_string(&mut toml_file)?;
-
-    let config = toml::from_str(&toml_file)?;
-    Ok(config)
 }
