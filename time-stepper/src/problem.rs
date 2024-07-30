@@ -1,20 +1,28 @@
 use std::f64::consts::FRAC_1_PI;
 use std::ops::Mul;
 
-pub trait Problem {
+pub trait Problem: Clone + Sized {
     fn sqg(&self) -> bool;
     fn rossby(&self) -> f64;
     fn duration(&self) -> f64;
     fn time_step(&self) -> f64;
-    fn point_vortices(&self) -> &[PointVortex];
-    fn passive_tracers(&self) -> &[Vector];
+    fn point_vortices(&self) -> Vec<PointVortex>;
+    fn passive_tracers(&self) -> Vec<Vector>;
+    fn replace_tracers(self, tracers: &[Vector]) -> Self;
+    fn divide(&self, n: usize) -> Vec<Self> {
+        let npt = self.passive_tracers().len();
+        let chunk_size = (npt + n - 1) / n;
+        self.passive_tracers().chunks(chunk_size)
+            .map(|chunk| self.clone().replace_tracers(chunk))
+            .collect()
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
 #[derive(serde::Deserialize)]
 #[derive(npyz::AutoSerialize, npyz::Serialize)]
 #[derive(derive_more::Add, derive_more::Sub, derive_more::Sum)]
-pub struct Vector { pub(crate) x: f64, pub(crate) y: f64, pub(crate) z: f64 }
+pub struct Vector { pub x: f64, pub y: f64, pub z: f64 }
 
 impl Mul<Vector> for f64 {
     type Output = Vector;
@@ -79,6 +87,10 @@ impl Solver {
 
     pub fn state(&self) -> &State {
         &self.state
+    }
+
+    pub fn velocity(&self) -> impl Iterator<Item=Vector> + '_ {
+        self.buffer.ks.iter().map(|&ks| ks[0])
     }
 
     fn first_order_change(&mut self, i: usize) {

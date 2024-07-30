@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 
-use lib::problem::{PointVortex, Vector};
+use time_stepper::problem::{PointVortex, Vector};
 
 #[derive(Deserialize)]
 #[derive(Clone)]
@@ -14,27 +14,19 @@ pub struct Problem {
     pub duration: f64,
     pub time_step: f64,
     pub point_vortices: Vec<PointVortex>,
-    #[serde(deserialize_with = "lib::config::deserialize_tracers")]
+    #[serde(deserialize_with = "time_stepper::config::deserialize_tracers")]
     pub passive_tracers: Vec<Vector>,
     pub write_interval: Option<usize>,
 }
 
-impl lib::problem::Problem for Problem {
+impl time_stepper::problem::Problem for Problem {
     fn sqg(&self) -> bool { self.sqg }
     fn rossby(&self) -> f64 { self.rossby }
     fn duration(&self) -> f64 { self.duration }
     fn time_step(&self) -> f64 { self.time_step }
-    fn point_vortices(&self) -> &[PointVortex] { &self.point_vortices }
-    fn passive_tracers(&self) -> &[Vector] { &self.passive_tracers }
-}
-
-impl Problem {
-    pub fn divide(&self, n: usize) -> impl Iterator<Item=Self> + '_ {
-        let npt = self.passive_tracers.len();
-        let chunk_size = (npt + n - 1) / n;
-        self.passive_tracers.chunks(chunk_size)
-            .map(|chunk| Self { passive_tracers: chunk.to_owned(), ..self.clone() })
-    }
+    fn point_vortices(&self) -> Vec<PointVortex> { self.point_vortices.clone() }
+    fn passive_tracers(&self) -> Vec<Vector> { self.passive_tracers.clone() }
+    fn replace_tracers(self, tracers: &[Vector]) -> Self { Self { passive_tracers: tracers.to_owned(), ..self } }
 }
 
 pub fn parse(path: &Path) -> Result<Problem, crate::error::Error> {

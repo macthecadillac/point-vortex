@@ -9,12 +9,12 @@ edition.workspace = true
 chrono = "0.4.35"
 clap = { version = "4.2", features = ["derive"]}
 main_error = "0.1.2"
-serde = { version = "1.0", features = ["serde_derive"] }
 npyz = { version = "0.8", features = ["derive"]}
 rayon = "1.10.0"
+serde = { version = "1.0", features = ["serde_derive"] }
 toml = "0.7"
 
-lib = { path = "../lib" }
+time-stepper = { path = "../time-stepper" }
 
 [[bin]]
 name = "pv"

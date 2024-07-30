@@ -1,5 +1,5 @@
 [workspace]
-members = ["pv", "ftle", "lib"]
+members = ["pv", "ftle", "time-stepper"]
 default-members = ["pv", "ftle"]
 resolver = "2"
 

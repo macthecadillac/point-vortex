@@ -8,8 +8,9 @@ use std::io::BufWriter;
 use std::path::Path;
 use std::slice;
 
-use lib::error;
-use lib::problem;
+use time_stepper::error;
+use time_stepper::problem;
+use time_stepper::problem::Problem;
 
 use main_error::MainError;
 
@@ -111,7 +112,7 @@ fn main() -> Result<(), MainError> {
         let mut mbuf = Vec::new();
         mbuf.reserve_exact(buffer_size);
         let mut solver = problem::Solver::new(&problem);
-        let mut progress = lib::Progress::new(niter);
+        let mut progress = time_stepper::Progress::new(niter);
         for i in 1..niter {
             solver.step();
             if i % stride == 0 {
@@ -135,7 +136,7 @@ fn main() -> Result<(), MainError> {
         for p in problem.divide(nthreads) {
             solvers.push(problem::Solver::new(&p));
         }
-        let mut progress = vec![lib::Progress::new(niter); nthreads];
+        let mut progress = vec![time_stepper::Progress::new(niter); nthreads];
         let buffer_niter = buf_size_per_thread / buf_size_per_thread_per_step * stride;
         let n_segments = (niter + buffer_niter - 2) / buffer_niter;
         for i in 0..n_segments {
