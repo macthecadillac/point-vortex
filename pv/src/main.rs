@@ -111,7 +111,7 @@ fn main() -> Result<(), MainError> {
     if nthreads == 1 {
         let mut mbuf = Vec::new();
         mbuf.reserve_exact(buffer_size);
-        let mut solver = problem::Solver::new(&problem);
+        let mut solver = problem::OwnedSolver::new(&problem);
         let mut progress = time_stepper::Progress::new(niter);
         for i in 1..niter {
             solver.step();
@@ -134,7 +134,7 @@ fn main() -> Result<(), MainError> {
         }
         let mut solvers = Vec::new();
         for p in problem.divide(nthreads) {
-            solvers.push(problem::Solver::new(&p));
+            solvers.push(problem::OwnedSolver::new(&p));
         }
         let mut progress = vec![time_stepper::Progress::new(niter); nthreads];
         let buffer_niter = buf_size_per_thread / buf_size_per_thread_per_step * stride;

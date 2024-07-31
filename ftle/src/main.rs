@@ -30,26 +30,28 @@ struct Args {
     nosave: bool,
 }
 
-struct ForwardTimeLyapunovExponent {
+struct ForwardTimeLyapunovExponent<'a> {
     t: f64,
     delta_t: f64,
     delta: f64,
     prev: f64,
     curr: f64,
     tol: f64,
-    time_stepper: problem::Solver,
+    time_stepper: problem::Solver<'a>,
     done: bool
 }
 
-impl ForwardTimeLyapunovExponent {
-    fn new(problem: &crate::config::P) -> Self {
+impl<'a> ForwardTimeLyapunovExponent<'a> {
+    fn new(problem: &crate::config::P,
+           pv_buf: &'a mut [problem::PointVortex],
+           v_buf: &'a mut [Vector]) -> Self {
         let t = 0.;
         let delta_t = problem.time_step;
         let delta = problem.delta;
         let prev = 0.;
         let curr = 0.;
         let tol = problem.tol;
-        let time_stepper = problem::Solver::new(problem);
+        let time_stepper = problem::Solver::new(problem, pv_buf, v_buf);
         let done = false;
         Self { t, delta_t, delta, prev, curr, tol, time_stepper, done }
     }
@@ -104,6 +106,7 @@ fn main() -> Result<(), MainError> {
     let path = Path::new(&args.config);
     let problem = config::parse(&path)?;
     let npt = problem.grid_points.len();
+    let problem_w_delta = problem.add_delta_tracers();
     let start_time = Local::now();
     println!("Run started at {}", start_time.format("%m-%d-%Y %H:%M:%S"));
 
@@ -118,12 +121,18 @@ fn main() -> Result<(), MainError> {
             .writer(b).begin_nd())
         .transpose()? {
 
-        let mut solvers: Vec<_> = problem.divide(npt)
-            .iter()
-            .map(ForwardTimeLyapunovExponent::new)
-            .collect();
-        let ftle_res: Result<Vec<f64>, &'static str> = solvers.par_iter_mut()
-            .map(|solver| solver.compute())
+        let subproblems = problem_w_delta.divide(npt);
+        let pv_buf_size = subproblems.iter().map(|p| problem::Solver::pv_buf_size(p)).sum();
+        let v_buf_size = subproblems.iter().map(|p| problem::Solver::v_buf_size(p)).sum();
+        let mut pv_buf = vec![problem::PointVortex::default(); pv_buf_size];
+        let mut v_buf = vec![Vector::default(); v_buf_size];
+        let ftle_res: Result<Vec<f64>, &'static str> =
+            subproblems.par_iter().zip(pv_buf.par_chunks_mut(pv_buf_size / npt))
+                                  .zip(v_buf.par_chunks_mut(v_buf_size / npt))
+                                  .map(|((subproblem, pv_buf_), v_buf_)| {
+                let mut solver = ForwardTimeLyapunovExponent::new(subproblem, pv_buf_, v_buf_);
+                solver.compute()
+            })
             .collect();
         let ftle = ftle_res?;
         writer.extend(ftle.into_iter())?;

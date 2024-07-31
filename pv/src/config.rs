@@ -24,8 +24,8 @@ impl time_stepper::problem::Problem for Problem {
     fn rossby(&self) -> f64 { self.rossby }
     fn duration(&self) -> f64 { self.duration }
     fn time_step(&self) -> f64 { self.time_step }
-    fn point_vortices(&self) -> Vec<PointVortex> { self.point_vortices.clone() }
-    fn passive_tracers(&self) -> Vec<Vector> { self.passive_tracers.clone() }
+    fn point_vortices(&self) -> &[PointVortex] { &self.point_vortices }
+    fn passive_tracers(&self) -> &[Vector] { &self.passive_tracers }
     fn replace_tracers(self, tracers: &[Vector]) -> Self { Self { passive_tracers: tracers.to_owned(), ..self } }
 }
 
