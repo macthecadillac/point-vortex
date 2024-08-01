@@ -3,13 +3,11 @@ use clap::Parser;
 use npyz::WriterBuilder;
 use rayon::prelude::*;
 
-use ndarray::array;
-use ndarray_linalg::Eig;
+use nalgebra::matrix;
 
 use std::cmp::PartialOrd;
 use std::fs::File;
 use std::io;
-//use std::io::prelude::*;
 use std::path::Path;
 
 use time_stepper::error;
@@ -54,7 +52,7 @@ impl ForwardTimeLyapunovExponent {
         Self { t, delta_t, delta, prev, curr, tol, time_stepper, done }
     }
 
-    fn grid_point(delta: f64, t: f64, xs: &[Vector]) -> Result<f64, &'static str> {
+    fn grid_point(delta: f64, t: f64, xs: &[Vector]) -> f64 {
         // Compute Jacobian
         let x0 = xs[0];
         let j00 = (xs[1].x - x0.x) / delta;
@@ -66,15 +64,12 @@ impl ForwardTimeLyapunovExponent {
         let j20 = (xs[3].x - x0.x) / delta;
         let j21 = (xs[3].y - x0.y) / delta;
         let j22 = (xs[3].z - x0.z) / delta;
-        let j = array![[j00, j01, j02], [j10, j11, j12], [j20, j21, j22]];
-        let cauchy_green = j.dot(&j.t());
-        if let Ok((eigs, _)) = cauchy_green.eig() {
-            let max_e = eigs.into_iter().max_by(|&a, &b| a.re.partial_cmp(&b.re).unwrap());
-            let res = max_e.unwrap().re.ln() / t;
-            Ok(res)
-        } else {
-            Err("Error at eig")
-        }
+        let j = matrix![j00, j01, j02; j10, j11, j12; j20, j21, j22];
+        let cauchy_green = j * j.transpose();  // nalgebra does dot product this way
+        let eigs = cauchy_green.complex_eigenvalues();
+        let max_e = eigs.into_iter().max_by(|&a, &b| a.re.partial_cmp(&b.re).unwrap());
+        let res = max_e.unwrap().re.ln() / t;
+        res
     }
 
     fn step(&mut self) -> Result<(), &'static str> {
@@ -85,7 +80,7 @@ impl ForwardTimeLyapunovExponent {
             self.delta,
             self.t,
             &self.time_stepper.state().passive_tracers
-        )?;
+        );
         self.done = (self.prev - self.curr).abs() < self.tol;
         Ok(())
     }
@@ -104,6 +99,7 @@ fn main() -> Result<(), MainError> {
     let path = Path::new(&args.config);
     let problem = config::parse(&path)?;
     let npt = problem.grid_points.len();
+    let problem_w_delta = problem.add_delta_tracers();
     let start_time = Local::now();
     println!("Run started at {}", start_time.format("%m-%d-%Y %H:%M:%S"));
 
@@ -118,7 +114,7 @@ fn main() -> Result<(), MainError> {
             .writer(b).begin_nd())
         .transpose()? {
 
-        let mut solvers: Vec<_> = problem.divide(npt)
+        let mut solvers: Vec<_> = problem_w_delta.divide(npt)
             .iter()
             .map(ForwardTimeLyapunovExponent::new)
             .collect();

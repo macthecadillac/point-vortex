@@ -9,12 +9,13 @@ edition.workspace = true
 chrono = "0.4.35"
 clap = { version = "4.2", features = ["derive"]}
 main_error = "0.1.2"
-ndarray = { version = "0.15.6", features = ["blas"] }
-blas-src = { version = "*", features = ["openblas"] }
-openblas-src = { version = "*", features = ["system"] }
-ndarray-linalg = { version = "0.16", features = ["openblas-system"] }
+nalgebra = "0.33.*"
+# ndarray = { version = "0.15.6", features = ["blas"] }
+# blas-src = { version = "*", features = ["openblas"] }
+# openblas-src = { version = "*", features = ["system"] }
+# ndarray-linalg = { version = "0.16", features = ["openblas-system"] }
 npyz = { version = "0.8", features = ["derive"]}
-rayon = "1.10.0"
+rayon = "1.10.*"
 serde = { version = "1.0", features = ["serde_derive"] }
 toml = "0.7"
 

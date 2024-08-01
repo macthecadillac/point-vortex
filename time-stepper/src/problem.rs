@@ -6,15 +6,15 @@ pub trait Problem: Clone + Sized {
     fn rossby(&self) -> f64;
     fn duration(&self) -> f64;
     fn time_step(&self) -> f64;
-    fn point_vortices(&self) -> Vec<PointVortex>;
-    fn passive_tracers(&self) -> Vec<Vector>;
+    fn point_vortices(&self) -> &[PointVortex];
+    fn passive_tracers(&self) -> &[Vector];
     fn replace_tracers(self, tracers: &[Vector]) -> Self;
     fn divide(&self, n: usize) -> Vec<Self> {
-        let npt = self.passive_tracers().len();
-        let chunk_size = (npt + n - 1) / n;
-        self.passive_tracers().chunks(chunk_size)
-            .map(|chunk| self.clone().replace_tracers(chunk))
-            .collect()
+        let pt = self.passive_tracers();
+        let chunk_size = (pt.len() + n - 1) / n;
+        pt.chunks(chunk_size)
+          .map(|chunk| self.clone().replace_tracers(chunk))
+          .collect()
     }
 }
 

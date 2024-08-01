@@ -19,23 +19,27 @@ pub struct P {
     pub grid_points: Vec<Vector>
 }
 
+impl P {
+    pub(crate) fn add_delta_tracers(&self) -> Self {
+        let mut grid_points = vec![];
+        for &v in self.grid_points.iter() {
+            grid_points.push(v);
+            grid_points.push(Vector { x: v.x + self.delta, ..v });
+            grid_points.push(Vector { y: v.y + self.delta, ..v });
+            grid_points.push(Vector { z: v.z - self.delta, ..v });
+        }
+        Self { grid_points, ..self.clone() }
+    }
+}
+
 impl Problem for P {
     fn sqg(&self) -> bool { self.sqg }
     fn rossby(&self) -> f64 { self.rossby }
     fn duration(&self) -> f64 { 0. }
     fn time_step(&self) -> f64 { self.time_step }
-    fn point_vortices(&self) -> Vec<PointVortex> { self.point_vortices.clone() }
+    fn point_vortices(&self) -> &[PointVortex] { &self.point_vortices }
     fn replace_tracers(self, tracers: &[Vector]) -> Self { Self { grid_points: tracers.to_owned(), ..self } }
-    fn passive_tracers(&self) -> Vec<Vector> {
-        let mut points = vec![];
-        for &v in self.grid_points.iter() {
-            points.push(v);
-            points.push(v + Vector { x: v.x + self.delta, ..v });
-            points.push(v + Vector { y: v.y + self.delta, ..v });
-            points.push(v + Vector { z: v.z - self.delta, ..v });
-        }
-        points
-    }
+    fn passive_tracers(&self) -> &[Vector] { &self.grid_points }
 }
 
 pub fn parse(path: &Path) -> Result<P, crate::error::Error> {
