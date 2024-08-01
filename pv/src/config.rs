@@ -14,7 +14,7 @@ pub struct Problem {
     pub duration: f64,
     pub time_step: f64,
     pub point_vortices: Vec<PointVortex>,
-    #[serde(deserialize_with = "time_stepper::config::deserialize_tracers")]
+    #[serde(deserialize_with = "time_stepper::config::grid_or_vectors")]
     pub passive_tracers: Vec<Vector>,
     pub write_interval: Option<usize>,
 }

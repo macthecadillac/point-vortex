@@ -64,6 +64,13 @@ impl Grid {
     }
 }
 
+pub fn deserialize_grid<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
+    where D: Deserializer<'de> {
+    let grid =  Grid::deserialize(deserializer).map_err(D::Error::custom)?;
+    let iter = grid.try_into_iter().map_err(D::Error::custom)?;
+    Ok(iter.collect())
+}
+
 #[derive(Deserialize)]
 #[serde(untagged)]
 pub enum GridOrVector { Grid(Grid), Vector(Vector) }
@@ -71,7 +78,7 @@ pub enum GridOrVector { Grid(Grid), Vector(Vector) }
 #[derive(Deserialize)]
 pub struct GridOrVectors(Vec<GridOrVector>);
 
-pub fn deserialize_tracers<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
+pub fn grid_or_vectors<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
     where D: Deserializer<'de>, {
     let GridOrVectors(pts) =  GridOrVectors::deserialize(deserializer).map_err(D::Error::custom)?;
     let mut tracers = vec![];

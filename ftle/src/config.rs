@@ -15,7 +15,7 @@ pub struct P {
     pub delta: f64,
     pub tol: f64,
     pub point_vortices: Vec<PointVortex>,
-    #[serde(deserialize_with = "time_stepper::config::deserialize_tracers")]
+    #[serde(deserialize_with = "time_stepper::config::deserialize_grid")]
     pub grid_points: Vec<Vector>
 }
 
