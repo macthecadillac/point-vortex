@@ -38,7 +38,17 @@ impl Problem for P {
     fn duration(&self) -> f64 { 0. }
     fn time_step(&self) -> f64 { self.time_step }
     fn point_vortices(&self) -> &[PointVortex] { &self.point_vortices }
-    fn replace_tracers(self, tracers: &[Vector]) -> Self { Self { grid_points: tracers.to_owned(), ..self } }
+    fn replace_tracers(&self, tracers: &[Vector]) -> Self {
+        Self {
+            sqg: self.sqg,
+            rossby: self.rossby,
+            time_step: self.time_step,
+            delta: self.delta,
+            tol: self.tol,
+            grid_points: tracers.to_owned(),
+            point_vortices: self.point_vortices.clone(),
+        }
+    }
     fn passive_tracers(&self) -> &[Vector] { &self.grid_points }
 }
 

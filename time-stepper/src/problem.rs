@@ -8,12 +8,12 @@ pub trait Problem: Clone + Sized {
     fn time_step(&self) -> f64;
     fn point_vortices(&self) -> &[PointVortex];
     fn passive_tracers(&self) -> &[Vector];
-    fn replace_tracers(self, tracers: &[Vector]) -> Self;
+    fn replace_tracers(&self, tracers: &[Vector]) -> Self;
     fn divide(&self, n: usize) -> Vec<Self> {
         let pt = self.passive_tracers();
         let chunk_size = (pt.len() + n - 1) / n;
         pt.chunks(chunk_size)
-          .map(|chunk| self.clone().replace_tracers(chunk))
+          .map(|chunk| self.replace_tracers(chunk))
           .collect()
     }
 }

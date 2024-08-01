@@ -26,7 +26,7 @@ impl time_stepper::problem::Problem for Problem {
     fn time_step(&self) -> f64 { self.time_step }
     fn point_vortices(&self) -> &[PointVortex] { &self.point_vortices }
     fn passive_tracers(&self) -> &[Vector] { &self.passive_tracers }
-    fn replace_tracers(self, tracers: &[Vector]) -> Self { Self { passive_tracers: tracers.to_owned(), ..self } }
+    fn replace_tracers(&self, tracers: &[Vector]) -> Self { Self { passive_tracers: tracers.to_owned(), ..self.clone() } }
 }
 
 pub fn parse(path: &Path) -> Result<Problem, crate::error::Error> {
