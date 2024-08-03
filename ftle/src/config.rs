@@ -23,9 +23,11 @@ impl P {
     pub(crate) fn add_delta_tracers(&self) -> Self {
         let mut grid_points = vec![];
         for &v in self.grid_points.iter() {
-            grid_points.push(v);
             grid_points.push(Vector { x: v.x + self.delta, ..v });
+            grid_points.push(Vector { x: v.x - self.delta, ..v });
             grid_points.push(Vector { y: v.y + self.delta, ..v });
+            grid_points.push(Vector { y: v.y - self.delta, ..v });
+            grid_points.push(Vector { z: v.z + self.delta, ..v });
             grid_points.push(Vector { z: v.z - self.delta, ..v });
         }
         Self { grid_points, ..self.clone() }

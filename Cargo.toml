@@ -5,7 +5,7 @@ resolver = "2"
 
 [workspace.package]
 authors = ["Mac Lee <mal004@ucsd.edu>"]
-version = "0.2.1"
+version = "0.2.2"
 description = "Study point vortex dynamics under SQG+"
 edition = "2021"
 

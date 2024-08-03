@@ -286,7 +286,7 @@ dependencies = [
 
 [[package]]
 name = "ftle"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "clap",
@@ -588,7 +588,7 @@ dependencies = [
 
 [[package]]
 name = "pv"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "clap",
@@ -793,7 +793,7 @@ dependencies = [
 
 [[package]]
 name = "time-stepper"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "chrono",
  "derive_more",

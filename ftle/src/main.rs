@@ -54,16 +54,16 @@ impl ForwardTimeLyapunovExponent {
 
     fn grid_point(delta: f64, t: f64, xs: &[Vector]) -> f64 {
         // Compute Jacobian
-        let x0 = xs[0];
-        let j00 = (xs[1].x - x0.x) / delta;
-        let j01 = (xs[1].y - x0.y) / delta;
-        let j02 = (xs[1].z - x0.z) / delta;
-        let j10 = (xs[2].x - x0.x) / delta;
-        let j11 = (xs[2].y - x0.y) / delta;
-        let j12 = (xs[2].z - x0.z) / delta;
-        let j20 = (xs[3].x - x0.x) / delta;
-        let j21 = (xs[3].y - x0.y) / delta;
-        let j22 = (xs[3].z - x0.z) / delta;
+        let a = 0.5 / delta;
+        let j00 = a * (xs[1].x - xs[0].x);
+        let j01 = a * (xs[1].y - xs[0].y);
+        let j02 = a * (xs[1].z - xs[0].z);
+        let j10 = a * (xs[3].x - xs[2].x);
+        let j11 = a * (xs[3].y - xs[2].y);
+        let j12 = a * (xs[3].z - xs[2].z);
+        let j20 = a * (xs[5].x - xs[4].x);
+        let j21 = a * (xs[5].y - xs[4].y);
+        let j22 = a * (xs[5].z - xs[4].z);
         let j = matrix![j00, j01, j02; j10, j11, j12; j20, j21, j22];
         let cauchy_green = j * j.transpose();  // nalgebra does dot product this way
         let eigs = cauchy_green.complex_eigenvalues();
