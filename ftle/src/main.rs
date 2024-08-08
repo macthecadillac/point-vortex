@@ -28,28 +28,26 @@ struct Args {
     nosave: bool,
 }
 
-struct ForwardTimeLyapunovExponent {
+struct FiniteTimeLyapunovExponent {
     t: f64,
+    tmax: f64,
     delta_t: f64,
     delta: f64,
     prev: f64,
     curr: f64,
-    tol: f64,
-    time_stepper: problem::Solver,
-    done: bool
+    time_stepper: problem::Solver
 }
 
-impl ForwardTimeLyapunovExponent {
+impl FiniteTimeLyapunovExponent {
     fn new(problem: &crate::config::P) -> Self {
         let t = 0.;
+        let tmax = problem.t;
         let delta_t = problem.time_step;
         let delta = problem.delta;
         let prev = 0.;
         let curr = 0.;
-        let tol = problem.tol;
         let time_stepper = problem::Solver::new(problem);
-        let done = false;
-        Self { t, delta_t, delta, prev, curr, tol, time_stepper, done }
+        Self { t, tmax, delta_t, delta, prev, curr, time_stepper }
     }
 
     fn grid_point(delta: f64, t: f64, xs: &[Vector]) -> f64 {
@@ -76,12 +74,11 @@ impl ForwardTimeLyapunovExponent {
         self.time_stepper.step();
         self.t += self.delta_t;
         self.prev = self.curr;
-        self.curr = ForwardTimeLyapunovExponent::grid_point(
+        self.curr = FiniteTimeLyapunovExponent::grid_point(
             self.delta,
             self.t,
             &self.time_stepper.state().passive_tracers
         );
-        self.done = (self.prev - self.curr).abs() < self.tol;
         Ok(())
     }
 
@@ -89,7 +86,7 @@ impl ForwardTimeLyapunovExponent {
         loop {
             let res = self.step();
             if let Err(e) = res { break Err(e) }
-            if self.done { break Ok(self.curr) }
+            if self.t >= self.tmax { break Ok(self.curr) }
         }
     }
 }
@@ -116,7 +113,7 @@ fn main() -> Result<(), MainError> {
 
         let mut solvers: Vec<_> = problem_w_delta.divide(npt)
             .iter()
-            .map(ForwardTimeLyapunovExponent::new)
+            .map(FiniteTimeLyapunovExponent::new)
             .collect();
         let ftle_res: Result<Vec<f64>, &'static str> = solvers.par_iter_mut()
             .map(|solver| solver.compute())

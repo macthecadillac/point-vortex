@@ -11,9 +11,9 @@ use time_stepper::problem::{PointVortex, Problem, Vector};
 pub struct P {
     pub sqg: bool,
     pub rossby: f64,
+    pub t: f64,
     pub time_step: f64,
     pub delta: f64,
-    pub tol: f64,
     pub point_vortices: Vec<PointVortex>,
     #[serde(deserialize_with = "time_stepper::config::deserialize_grid")]
     pub grid_points: Vec<Vector>
@@ -43,10 +43,10 @@ impl Problem for P {
     fn replace_tracers(&self, tracers: &[Vector]) -> Self {
         Self {
             sqg: self.sqg,
+            t: self.t,
             rossby: self.rossby,
             time_step: self.time_step,
             delta: self.delta,
-            tol: self.tol,
             grid_points: tracers.to_owned(),
             point_vortices: self.point_vortices.clone(),
         }
