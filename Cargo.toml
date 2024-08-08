@@ -1,13 +1,22 @@
-[workspace]
-members = ["pv", "ftle", "time-stepper"]
-default-members = ["pv", "ftle"]
-resolver = "2"
-
-[workspace.package]
+[package]
 authors = ["Mac Lee <mal004@ucsd.edu>"]
-version = "0.2.2"
+name = "sqgx-pv"
+version = "0.3.0"
+resolver = "2"
 description = "Study point vortex dynamics under SQG+"
 edition = "2021"
+
+[dependencies]
+chrono = "0.4.*"
+clap = { version = "4.2", features = ["derive"]}
+err-derive = "0.3"
+derive_more = "0.99"
+main_error = "0.1.*"
+nalgebra = "0.33.*"
+npyz = { version = "0.8", features = ["derive"]}
+rayon = "1.10.*"
+serde = { version = "1.0", features = ["serde_derive"] }
+toml = "0.7"
 
 [profile.release]
 strip = "symbols"

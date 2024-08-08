@@ -1,10 +1,9 @@
 use std::f64::consts::FRAC_1_PI;
 use std::ops::Mul;
 
-pub trait Problem: Clone + Sized {
+pub(crate) trait Problem: Clone + Sized {
     fn sqg(&self) -> bool;
     fn rossby(&self) -> f64;
-    fn duration(&self) -> f64;
     fn time_step(&self) -> f64;
     fn point_vortices(&self) -> &[PointVortex];
     fn passive_tracers(&self) -> &[Vector];
@@ -22,7 +21,7 @@ pub trait Problem: Clone + Sized {
 #[derive(serde::Deserialize)]
 #[derive(npyz::AutoSerialize, npyz::Serialize)]
 #[derive(derive_more::Add, derive_more::Sub, derive_more::Sum)]
-pub struct Vector { pub x: f64, pub y: f64, pub z: f64 }
+pub(crate) struct Vector { pub(crate) x: f64, pub(crate) y: f64, pub(crate) z: f64 }
 
 impl Mul<Vector> for f64 {
     type Output = Vector;
@@ -42,15 +41,15 @@ impl Vector {
 }
 
 #[derive(serde::Deserialize, Copy, Clone, Default)]
-pub struct PointVortex {
-    pub strength: f64,
-    pub position: Vector
+pub(crate) struct PointVortex {
+    pub(crate) strength: f64,
+    pub(crate) position: Vector
 }
 
 #[derive(Clone)]
-pub struct State {
-    pub point_vortices: Vec<PointVortex>,
-    pub passive_tracers: Vec<Vector>
+pub(crate) struct State {
+    pub(crate) point_vortices: Vec<PointVortex>,
+    pub(crate) passive_tracers: Vec<Vector>
 }
 
 struct Buffer {
@@ -59,7 +58,7 @@ struct Buffer {
     state: State
 }
 
-pub struct Solver {
+pub(crate) struct Solver {
     rossby: f64,
     sqg: bool,
     dt: f64,
@@ -68,7 +67,7 @@ pub struct Solver {
 }
 
 impl Solver {
-    pub fn new(problem: &impl Problem) -> Self {
+    pub(crate) fn new(problem: &impl Problem) -> Self {
         let rossby = problem.rossby();
         let dt = problem.time_step();
         let sqg = problem.sqg();
@@ -85,12 +84,8 @@ impl Solver {
         Solver { rossby, sqg, dt, state, buffer }
     }
 
-    pub fn state(&self) -> &State {
+    pub(crate) fn state(&self) -> &State {
         &self.state
-    }
-
-    pub fn velocity(&self) -> impl Iterator<Item=Vector> + '_ {
-        self.buffer.ks.iter().map(|&ks| ks[0])
     }
 
     fn first_order_change(&mut self, i: usize) {
@@ -127,7 +122,7 @@ impl Solver {
     }
 
     // Classic Runge-Kutta method
-    pub fn step(&mut self) {
+    pub(crate) fn step(&mut self) {
         self.first_order_change(0);
         self.euler_est(0.5 * self.dt, 0);
         self.first_order_change(1);

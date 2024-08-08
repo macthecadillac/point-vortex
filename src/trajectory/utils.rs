@@ -3,10 +3,6 @@ use chrono::{DateTime, Local};
 use std::io;
 use std::io::prelude::*;
 
-pub mod config;
-pub mod error;
-pub mod problem;
-
 #[derive(Clone, Copy)]
 pub struct Progress {
     pub threshold: f64,

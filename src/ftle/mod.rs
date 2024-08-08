@@ -8,25 +8,14 @@ use nalgebra::matrix;
 use std::cmp::PartialOrd;
 use std::fs::File;
 use std::io;
-use std::path::Path;
+use std::path::PathBuf;
 
-use time_stepper::error;
-use time_stepper::problem;
-use time_stepper::problem::{Problem, Vector};
+use crate::problem;
+use crate::problem::{Problem, Vector};
 
 use main_error::MainError;
 
 mod config;
-
-#[derive(Parser, Debug)]
-#[command(author, version, about)]
-struct Args {
-    /// Path to configuration file
-    config: String,
-    #[arg(long)]
-    /// Do not write output to disk
-    nosave: bool,
-}
 
 struct FiniteTimeLyapunovExponent {
     t: f64,
@@ -39,7 +28,7 @@ struct FiniteTimeLyapunovExponent {
 }
 
 impl FiniteTimeLyapunovExponent {
-    fn new(problem: &crate::config::P) -> Self {
+    fn new(problem: &config::P) -> Self {
         let t = 0.;
         let tmax = problem.t;
         let delta_t = problem.time_step;
@@ -91,37 +80,47 @@ impl FiniteTimeLyapunovExponent {
     }
 }
 
-fn main() -> Result<(), MainError> {
-    let args = Args::parse();
-    let path = Path::new(&args.config);
-    let problem = config::parse(&path)?;
-    let npt = problem.grid_points.len();
-    let problem_w_delta = problem.add_delta_tracers();
-    let start_time = Local::now();
-    println!("Run started at {}", start_time.format("%m-%d-%Y %H:%M:%S"));
+#[derive(Parser, Debug)]
+pub(crate) struct Parameters {
+    /// Path to configuration file
+    pub(crate) config: PathBuf,
+    #[arg(long)]
+    /// Do not write output to disk
+    pub(crate) nosave: bool,
+}
 
-    let mut fbuf = (!args.nosave)
-        .then(|| File::create(path.with_extension("npy")).map(|f| io::BufWriter::new(f)))
-        .transpose()?;
+impl Parameters {
+    pub(crate) fn run(self) -> Result<(), MainError> {
+        let config_path = self.config;
+        let problem = config::parse(&config_path)?;
+        let npt = problem.grid_points.len();
+        let problem_w_delta = problem.add_delta_tracers();
+        let start_time = Local::now();
+        println!("Run started at {}", start_time.format("%m-%d-%Y %H:%M:%S"));
 
-    if let Some(mut writer) = fbuf.as_mut()
-        .map(|b| npyz::WriteOptions::new()
-            .default_dtype()
-            .shape(&[npt as u64])
-            .writer(b).begin_nd())
-        .transpose()? {
+        let mut fbuf = (!self.nosave)
+            .then(|| File::create(config_path.with_extension("npy")).map(|f| io::BufWriter::new(f)))
+            .transpose()?;
 
-        let mut solvers: Vec<_> = problem_w_delta.divide(npt)
-            .iter()
-            .map(FiniteTimeLyapunovExponent::new)
-            .collect();
-        let ftle_res: Result<Vec<f64>, &'static str> = solvers.par_iter_mut()
-            .map(|solver| solver.compute())
-            .collect();
-        let ftle = ftle_res?;
-        writer.extend(ftle.into_iter())?;
-        writer.finish()?;
-        println!("Done.");
+        if let Some(mut writer) = fbuf.as_mut()
+            .map(|b| npyz::WriteOptions::new()
+                .default_dtype()
+                .shape(&[npt as u64])
+                .writer(b).begin_nd())
+            .transpose()? {
+
+            let mut solvers: Vec<_> = problem_w_delta.divide(npt)
+                .iter()
+                .map(FiniteTimeLyapunovExponent::new)
+                .collect();
+            let ftle_res: Result<Vec<f64>, &'static str> = solvers.par_iter_mut()
+                .map(|solver| solver.compute())
+                .collect();
+            let ftle = ftle_res?;
+            writer.extend(ftle.into_iter())?;
+            writer.finish()?;
+            println!("Done.");
+        }
+        Ok(())
     }
-    Ok(())
 }

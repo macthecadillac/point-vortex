@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 
-use time_stepper::problem::{PointVortex, Problem, Vector};
+use crate::problem::{PointVortex, Problem, Vector};
 
 #[derive(Deserialize)]
 #[derive(Clone)]
@@ -15,7 +15,7 @@ pub struct P {
     pub time_step: f64,
     pub delta: f64,
     pub point_vortices: Vec<PointVortex>,
-    #[serde(deserialize_with = "time_stepper::config::deserialize_grid")]
+    #[serde(deserialize_with = "crate::config::deserialize_grid")]
     pub grid_points: Vec<Vector>
 }
 
@@ -37,7 +37,6 @@ impl P {
 impl Problem for P {
     fn sqg(&self) -> bool { self.sqg }
     fn rossby(&self) -> f64 { self.rossby }
-    fn duration(&self) -> f64 { 0. }
     fn time_step(&self) -> f64 { self.time_step }
     fn point_vortices(&self) -> &[PointVortex] { &self.point_vortices }
     fn replace_tracers(&self, tracers: &[Vector]) -> Self {

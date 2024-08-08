@@ -4,10 +4,10 @@ use serde::de::Error;
 use crate::problem::Vector;
 
 #[derive(Copy, Clone, Deserialize)]
-pub struct Range { start: f64, end: f64, n: usize }
+pub(crate) struct Range { start: f64, end: f64, n: usize }
 
 #[derive(Clone, Copy)]
-pub struct RangeIter { start: f64, step_size: f64, n: usize }
+pub(crate) struct RangeIter { start: f64, step_size: f64, n: usize }
 
 impl Iterator for RangeIter {
     type Item = f64;
@@ -24,7 +24,7 @@ impl Iterator for RangeIter {
 }
 
 impl Range {
-    pub fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
+    pub(crate) fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
         use crate::error::Error;
         match self {
             Range { n, .. } if n < 2 => Err(Error::EmptyRange),
@@ -40,10 +40,10 @@ impl Range {
 
 #[derive(Copy, Clone, Deserialize)]
 #[serde(untagged)]
-pub enum PointOrRange { Point(f64), Range(Range) }
+pub(crate) enum PointOrRange { Point(f64), Range(Range) }
 
 impl PointOrRange {
-    pub fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
+    pub(crate) fn try_into_iter(self) -> Result<RangeIter, crate::error::Error> {
         match self {
             PointOrRange::Range(r) => Ok(r.try_into_iter()?),
             PointOrRange::Point(p) => Ok(RangeIter { start: p, n: 1, step_size: 1. })
@@ -52,10 +52,10 @@ impl PointOrRange {
 }
 
 #[derive(Deserialize)]
-pub struct Grid { xs: PointOrRange, ys: PointOrRange, zs: PointOrRange }
+pub(crate) struct Grid { xs: PointOrRange, ys: PointOrRange, zs: PointOrRange }
 
 impl Grid {
-    pub fn try_into_iter(self) -> Result<impl Iterator<Item=Vector>, crate::error::Error> {
+    pub(crate) fn try_into_iter(self) -> Result<impl Iterator<Item=Vector>, crate::error::Error> {
         let Grid { xs, ys, zs } = self;
         let xiter = xs.try_into_iter()?;
         let yiter = ys.try_into_iter()?;
@@ -64,7 +64,7 @@ impl Grid {
     }
 }
 
-pub fn deserialize_grid<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
+pub(crate) fn deserialize_grid<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
     where D: Deserializer<'de> {
     let grid =  Grid::deserialize(deserializer).map_err(D::Error::custom)?;
     let iter = grid.try_into_iter().map_err(D::Error::custom)?;
@@ -73,12 +73,12 @@ pub fn deserialize_grid<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error
 
 #[derive(Deserialize)]
 #[serde(untagged)]
-pub enum GridOrVector { Grid(Grid), Vector(Vector) }
+pub(crate) enum GridOrVector { Grid(Grid), Vector(Vector) }
 
 #[derive(Deserialize)]
-pub struct GridOrVectors(Vec<GridOrVector>);
+pub(crate) struct GridOrVectors(Vec<GridOrVector>);
 
-pub fn grid_or_vectors<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
+pub(crate) fn grid_or_vectors<'de, D>(deserializer: D) -> Result<Vec<Vector>, D::Error>
     where D: Deserializer<'de>, {
     let GridOrVectors(pts) =  GridOrVectors::deserialize(deserializer).map_err(D::Error::custom)?;
     let mut tracers = vec![];

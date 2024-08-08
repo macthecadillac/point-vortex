@@ -285,21 +285,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ftle"
-version = "0.2.2"
-dependencies = [
- "chrono",
- "clap",
- "main_error",
- "nalgebra",
- "npyz",
- "rayon",
- "serde",
- "time-stepper",
- "toml",
-]
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -587,20 +572,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pv"
-version = "0.2.2"
-dependencies = [
- "chrono",
- "clap",
- "main_error",
- "npyz",
- "rayon",
- "serde",
- "time-stepper",
- "toml",
-]
-
-[[package]]
 name = "py_literal"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -732,6 +703,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "sqgx-pv"
+version = "0.3.0"
+dependencies = [
+ "chrono",
+ "clap",
+ "derive_more",
+ "err-derive",
+ "main_error",
+ "nalgebra",
+ "npyz",
+ "rayon",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "strsim"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -789,18 +776,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.55",
-]
-
-[[package]]
-name = "time-stepper"
-version = "0.2.2"
-dependencies = [
- "chrono",
- "derive_more",
- "err-derive",
- "npyz",
- "serde",
- "toml",
 ]
 
 [[package]]

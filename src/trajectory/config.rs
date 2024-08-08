@@ -4,7 +4,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::path::Path;
 
-use time_stepper::problem::{PointVortex, Vector};
+use crate::problem::{PointVortex, Vector};
 
 #[derive(Deserialize)]
 #[derive(Clone)]
@@ -14,15 +14,14 @@ pub struct Problem {
     pub duration: f64,
     pub time_step: f64,
     pub point_vortices: Vec<PointVortex>,
-    #[serde(deserialize_with = "time_stepper::config::grid_or_vectors")]
+    #[serde(deserialize_with = "crate::config::grid_or_vectors")]
     pub passive_tracers: Vec<Vector>,
     pub write_interval: Option<usize>,
 }
 
-impl time_stepper::problem::Problem for Problem {
+impl crate::problem::Problem for Problem {
     fn sqg(&self) -> bool { self.sqg }
     fn rossby(&self) -> f64 { self.rossby }
-    fn duration(&self) -> f64 { self.duration }
     fn time_step(&self) -> f64 { self.time_step }
     fn point_vortices(&self) -> &[PointVortex] { &self.point_vortices }
     fn passive_tracers(&self) -> &[Vector] { &self.passive_tracers }
