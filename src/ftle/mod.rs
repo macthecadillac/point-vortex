@@ -22,8 +22,6 @@ struct FiniteTimeLyapunovExponent {
     tmax: f64,
     delta_t: f64,
     delta: f64,
-    prev: f64,
-    curr: f64,
     time_stepper: problem::Solver
 }
 
@@ -33,10 +31,8 @@ impl FiniteTimeLyapunovExponent {
         let tmax = problem.t;
         let delta_t = problem.time_step;
         let delta = problem.delta;
-        let prev = 0.;
-        let curr = 0.;
         let time_stepper = problem::Solver::new(problem);
-        Self { t, tmax, delta_t, delta, prev, curr, time_stepper }
+        Self { t, tmax, delta_t, delta, time_stepper }
     }
 
     fn grid_point(delta: f64, t: f64, xs: &[Vector]) -> f64 {
@@ -59,23 +55,22 @@ impl FiniteTimeLyapunovExponent {
         res
     }
 
-    fn step(&mut self) -> Result<(), &'static str> {
+    fn step(&mut self) {
         self.time_stepper.step();
         self.t += self.delta_t;
-        self.prev = self.curr;
-        self.curr = FiniteTimeLyapunovExponent::grid_point(
-            self.delta,
-            self.t,
-            &self.time_stepper.state().passive_tracers
-        );
-        Ok(())
     }
 
     fn compute(&mut self) -> Result<f64, &'static str> {
         loop {
-            let res = self.step();
-            if let Err(e) = res { break Err(e) }
-            if self.t >= self.tmax { break Ok(self.curr) }
+            self.step();
+            if self.t >= self.tmax {
+                let ftle = FiniteTimeLyapunovExponent::grid_point(
+                    self.delta,
+                    self.t,
+                    &self.time_stepper.state().passive_tracers
+                );
+                break Ok(ftle)
+            }
         }
     }
 }

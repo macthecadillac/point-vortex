@@ -1,7 +1,7 @@
 [package]
 authors = ["Mac Lee <mal004@ucsd.edu>"]
 name = "sqgx-pv"
-version = "0.3.0"
+version = "0.3.1"
 resolver = "2"
 description = "Study point vortex dynamics under SQG+"
 edition = "2021"
