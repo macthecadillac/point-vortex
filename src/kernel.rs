@@ -1,7 +1,12 @@
+use serde::de::DeserializeOwned;
+
 use std::f64::consts::FRAC_1_PI;
+use std::fs::File;
+use std::io::prelude::*;
+use std::path::Path;
 use std::ops::Mul;
 
-pub(crate) trait Problem: Clone + Sized {
+pub(crate) trait Problem: Clone + Sized + DeserializeOwned {
     fn sqg(&self) -> bool;
     fn rossby(&self) -> f64;
     fn time_step(&self) -> f64;
@@ -14,6 +19,14 @@ pub(crate) trait Problem: Clone + Sized {
         pt.chunks(chunk_size)
           .map(|chunk| self.replace_tracers(chunk))
           .collect()
+    }
+    fn parse(path: &Path) -> Result<Self, crate::error::Error> {
+        let mut file = File::open(&path)?;
+        let mut toml_file = String::new();
+        file.read_to_string(&mut toml_file)?;
+
+        let config = toml::from_str(&toml_file)?;
+        Ok(config)
     }
 }
 

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Deserializer};
 use serde::de::Error;
 
-use crate::problem::Vector;
+use crate::kernel::Vector;
 
 #[derive(Copy, Clone, Deserialize)]
 pub(crate) struct Range { start: f64, end: f64, n: usize }

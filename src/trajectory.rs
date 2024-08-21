@@ -1,7 +1,9 @@
 use chrono::Local;
 use clap::Parser;
+use main_error::MainError;
 use npyz::WriterBuilder;
 use rayon::prelude::*;
+use serde::Deserialize;
 
 use std::fs::File;
 use std::io::BufWriter;
@@ -9,13 +11,31 @@ use std::path::PathBuf;
 use std::slice;
 
 use crate::error;
-use crate::problem;
-use crate::problem::Problem;
+use crate::kernel;
+use crate::kernel::{PointVortex, Problem, Vector};
+use crate::utils;
 
-use main_error::MainError;
+#[derive(Deserialize)]
+#[derive(Clone)]
+pub struct P {
+    pub sqg: bool,
+    pub rossby: f64,
+    pub duration: f64,
+    pub time_step: f64,
+    pub point_vortices: Vec<PointVortex>,
+    #[serde(deserialize_with = "crate::config::grid_or_vectors")]
+    pub passive_tracers: Vec<Vector>,
+    pub write_interval: Option<usize>,
+}
 
-mod config;
-mod utils;
+impl crate::kernel::Problem for P {
+    fn sqg(&self) -> bool { self.sqg }
+    fn rossby(&self) -> f64 { self.rossby }
+    fn time_step(&self) -> f64 { self.time_step }
+    fn point_vortices(&self) -> &[PointVortex] { &self.point_vortices }
+    fn passive_tracers(&self) -> &[Vector] { &self.passive_tracers }
+    fn replace_tracers(&self, tracers: &[Vector]) -> Self { Self { passive_tracers: tracers.to_owned(), ..self.clone() } }
+}
 
 struct MultiBufferData<'a, T> {
     npv: usize,
@@ -79,7 +99,7 @@ pub(crate) struct Parameters {
 impl Parameters {
     pub(crate) fn run(self) -> Result<(), MainError> {
         let config_path = self.config;
-        let problem = config::parse(&config_path)?;
+        let problem = P::parse(&config_path)?;
         let stride = problem.write_interval.unwrap_or(1);
         let niter = (problem.duration as f64 / problem.time_step).round() as usize / stride * stride;
         let npv = problem.point_vortices.len();
@@ -111,7 +131,7 @@ impl Parameters {
         if nthreads == 1 {
             let mut mbuf = Vec::new();
             mbuf.reserve_exact(buffer_size);
-            let mut solver = problem::Solver::new(&problem);
+            let mut solver = kernel::Solver::new(&problem);
             let mut progress = utils::Progress::new(niter);
             for i in 1..niter {
                 solver.step();
@@ -134,7 +154,7 @@ impl Parameters {
             }
             let mut solvers = Vec::new();
             for p in problem.divide(nthreads) {
-                solvers.push(problem::Solver::new(&p));
+                solvers.push(kernel::Solver::new(&p));
             }
             let mut progress = vec![utils::Progress::new(niter); nthreads];
             let buffer_niter = buf_size_per_thread / buf_size_per_thread_per_step * stride;

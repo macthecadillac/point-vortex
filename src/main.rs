@@ -2,13 +2,12 @@ use clap::{Parser, Subcommand};
 use main_error::MainError;
 
 mod config;
-///// complexity measure
-//mod cm;
 mod error;
 mod ftle;
 mod poincare_section;
-mod problem;
+mod kernel;
 mod trajectory;
+mod utils;
 
 #[derive(Debug, Subcommand)]
 enum Subcmd {
@@ -18,8 +17,6 @@ enum Subcmd {
     FTLE(ftle::Parameters),
     /// Compute Poincare sections
     Poincare(poincare_section::Parameters)
-    ///// Compute complexity measure
-    //CM(cm::Parameters)
 }
 
 #[derive(Parser, Debug)]
@@ -35,7 +32,6 @@ fn main() -> Result<(), MainError> {
         Subcmd::Trajectory(t) => t.run()?,
         Subcmd::FTLE(f) => f.run()?,
         Subcmd::Poincare(p) => p.run()?,
-        //Subcmd::CM(d) => d.run()?
     }
     Ok(())
 }

@@ -1,37 +1,82 @@
 use chrono::Local;
 use clap::Parser;
+use nalgebra::matrix;
 use npyz::WriterBuilder;
 use rayon::prelude::*;
-
-use nalgebra::matrix;
+use serde::Deserialize;
 
 use std::cmp::PartialOrd;
 use std::fs::File;
 use std::io;
 use std::path::PathBuf;
 
-use crate::problem;
-use crate::problem::{Problem, Vector};
+use crate::kernel;
+use crate::kernel::{PointVortex, Problem, Vector};
 
 use main_error::MainError;
 
-mod config;
+#[derive(Deserialize)]
+#[derive(Clone)]
+pub struct P {
+    pub sqg: bool,
+    pub rossby: f64,
+    pub t: f64,
+    pub time_step: f64,
+    pub delta: f64,
+    pub point_vortices: Vec<PointVortex>,
+    #[serde(deserialize_with = "crate::config::deserialize_grid")]
+    pub grid_points: Vec<Vector>
+}
+
+impl P {
+    pub(crate) fn add_delta_tracers(&self) -> Self {
+        let mut grid_points = vec![];
+        for &v in self.grid_points.iter() {
+            grid_points.push(Vector { x: v.x + self.delta, ..v });
+            grid_points.push(Vector { x: v.x - self.delta, ..v });
+            grid_points.push(Vector { y: v.y + self.delta, ..v });
+            grid_points.push(Vector { y: v.y - self.delta, ..v });
+            grid_points.push(Vector { z: v.z + self.delta, ..v });
+            grid_points.push(Vector { z: v.z - self.delta, ..v });
+        }
+        Self { grid_points, ..self.clone() }
+    }
+}
+
+impl Problem for P {
+    fn sqg(&self) -> bool { self.sqg }
+    fn rossby(&self) -> f64 { self.rossby }
+    fn time_step(&self) -> f64 { self.time_step }
+    fn point_vortices(&self) -> &[PointVortex] { &self.point_vortices }
+    fn replace_tracers(&self, tracers: &[Vector]) -> Self {
+        Self {
+            sqg: self.sqg,
+            t: self.t,
+            rossby: self.rossby,
+            time_step: self.time_step,
+            delta: self.delta,
+            grid_points: tracers.to_owned(),
+            point_vortices: self.point_vortices.clone(),
+        }
+    }
+    fn passive_tracers(&self) -> &[Vector] { &self.grid_points }
+}
 
 struct FiniteTimeLyapunovExponent {
     t: f64,
     tmax: f64,
     delta_t: f64,
     delta: f64,
-    time_stepper: problem::Solver
+    time_stepper: kernel::Solver
 }
 
 impl FiniteTimeLyapunovExponent {
-    fn new(problem: &config::P) -> Self {
+    fn new(problem: &P) -> Self {
         let t = 0.;
         let tmax = problem.t;
         let delta_t = problem.time_step;
         let delta = problem.delta;
-        let time_stepper = problem::Solver::new(problem);
+        let time_stepper = kernel::Solver::new(problem);
         Self { t, tmax, delta_t, delta, time_stepper }
     }
 
@@ -87,7 +132,7 @@ pub(crate) struct Parameters {
 impl Parameters {
     pub(crate) fn run(self) -> Result<(), MainError> {
         let config_path = self.config;
-        let problem = config::parse(&config_path)?;
+        let problem = P::parse(&config_path)?;
         let npt = problem.grid_points.len();
         let problem_w_delta = problem.add_delta_tracers();
         let start_time = Local::now();
