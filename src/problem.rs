@@ -21,6 +21,7 @@ pub(crate) trait Problem: Clone + Sized {
 #[derive(serde::Deserialize)]
 #[derive(npyz::AutoSerialize, npyz::Serialize)]
 #[derive(derive_more::Add, derive_more::Sub, derive_more::Sum)]
+#[derive(derive_more::Div)]
 pub(crate) struct Vector { pub(crate) x: f64, pub(crate) y: f64, pub(crate) z: f64 }
 
 impl Mul<Vector> for f64 {
