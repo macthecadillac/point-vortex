@@ -12,23 +12,23 @@ use std::slice;
 
 use crate::error;
 use crate::kernel;
-use crate::kernel::{PointVortex, Problem, Vector};
+use crate::kernel::{PointVortex, Specification, Vector};
 use crate::utils;
 
 #[derive(Deserialize)]
 #[derive(Clone)]
-pub struct P {
-    pub sqg: bool,
-    pub rossby: f64,
-    pub duration: f64,
-    pub time_step: f64,
-    pub point_vortices: Vec<PointVortex>,
+struct SimulationSpecification {
+    sqg: bool,
+    rossby: f64,
+    duration: f64,
+    time_step: f64,
+    point_vortices: Vec<PointVortex>,
     #[serde(deserialize_with = "crate::config::grid_or_vectors")]
-    pub passive_tracers: Vec<Vector>,
-    pub write_interval: Option<usize>,
+    passive_tracers: Vec<Vector>,
+    write_interval: Option<usize>,
 }
 
-impl crate::kernel::Problem for P {
+impl Specification for SimulationSpecification {
     fn sqg(&self) -> bool { self.sqg }
     fn rossby(&self) -> f64 { self.rossby }
     fn time_step(&self) -> f64 { self.time_step }
@@ -82,28 +82,28 @@ impl<'a, T> Iterator for MultiBufferChunksIter<'a, T> {
 }
 
 #[derive(Debug, Parser)]
-pub(crate) struct Parameters {
+pub struct Parameters {
     /// Path to configuration file
-    pub(crate) config: PathBuf,
+    pub config: PathBuf,
     #[arg(long)]
     /// Do not write output to disk
-    pub(crate) nosave: bool,
+    pub nosave: bool,
     #[arg(long)]
     /// Buffer size in bytes. Defaults to 72MB
-    pub(crate) buffer_size: Option<usize>,
+    pub buffer_size: Option<usize>,
     #[arg(long)]
     /// Number of threads. Runs in single-threaded mode if not provided
-    pub(crate) nthreads: Option<usize>
+    pub nthreads: Option<usize>
 }
 
 impl Parameters {
-    pub(crate) fn run(self) -> Result<(), MainError> {
+    pub fn run(self) -> Result<(), MainError> {
         let config_path = self.config;
-        let problem = P::parse(&config_path)?;
-        let stride = problem.write_interval.unwrap_or(1);
-        let niter = (problem.duration as f64 / problem.time_step).round() as usize / stride * stride;
-        let npv = problem.point_vortices.len();
-        let npt = problem.passive_tracers.len();
+        let spec = SimulationSpecification::parse(&config_path)?;
+        let stride = spec.write_interval.unwrap_or(1);
+        let niter = (spec.duration as f64 / spec.time_step).round() as usize / stride * stride;
+        let npv = spec.point_vortices.len();
+        let npt = spec.passive_tracers.len();
         let n = npv + npt;
         let nthreads = self.nthreads.unwrap_or(1);
         let chunk_size = self.buffer_size.unwrap_or(72 * 1024 * 1024) / 24;
@@ -125,19 +125,19 @@ impl Parameters {
                 .writer(b).begin_nd())
             .transpose()?;
 
-        writer.as_mut().map(|w| w.extend(problem.point_vortices.iter().map(|&pv| pv.position))).transpose()?;
-        writer.as_mut().map(|w| w.extend(problem.passive_tracers.iter().cloned())).transpose()?;
+        writer.as_mut().map(|w| w.extend(spec.point_vortices.iter().map(|&pv| pv.position))).transpose()?;
+        writer.as_mut().map(|w| w.extend(spec.passive_tracers.iter().cloned())).transpose()?;
 
         if nthreads == 1 {
             let mut mbuf = Vec::new();
             mbuf.reserve_exact(buffer_size);
-            let mut solver = kernel::Solver::new(&problem);
+            let mut time_stepper = kernel::TimeStepper::new(&spec);
             let mut progress = utils::Progress::new(niter);
             for i in 1..niter {
-                solver.step();
+                time_stepper.step();
                 if i % stride == 0 {
-                    mbuf.extend(solver.state().point_vortices.iter().map(|&pv| pv.position));
-                    mbuf.extend(&solver.state().passive_tracers);
+                    mbuf.extend(time_stepper.state().point_vortices.iter().map(|&pv| pv.position));
+                    mbuf.extend(&time_stepper.state().passive_tracers);
                     if mbuf.len() == buffer_size {
                         let data = mbuf.drain(..);
                         writer.as_mut().map(|w| w.extend(data)).transpose()?;
@@ -152,25 +152,25 @@ impl Parameters {
             for mbuf in mbufs.iter_mut() {
                 mbuf.reserve_exact(buf_size_per_thread);
             }
-            let mut solvers = Vec::new();
-            for p in problem.divide(nthreads) {
-                solvers.push(kernel::Solver::new(&p));
+            let mut time_steppers = Vec::new();
+            for p in spec.divide(nthreads) {
+                time_steppers.push(kernel::TimeStepper::new(&p));
             }
             let mut progress = vec![utils::Progress::new(niter); nthreads];
             let buffer_niter = buf_size_per_thread / buf_size_per_thread_per_step * stride;
             let n_segments = (niter + buffer_niter - 2) / buffer_niter;
             for i in 0..n_segments {
                 let mut bufs: Vec<_> = mbufs.par_iter_mut()
-                    .zip(solvers.par_iter_mut())
+                    .zip(time_steppers.par_iter_mut())
                     .zip(progress.par_iter_mut())
                     .enumerate()
-                    .map(|(n, ((mbuf, solver), progress))| {
+                    .map(|(n, ((mbuf, time_stepper), progress))| {
                         for _ in ((i == 0) as usize)..buffer_niter {
                             if progress.step >= niter { break }
-                            solver.step();
+                            time_stepper.step();
                             if progress.step % stride == 0 {
-                                mbuf.extend(solver.state().point_vortices.iter().map(|&pv| pv.position));
-                                mbuf.extend(&solver.state().passive_tracers);
+                                mbuf.extend(time_stepper.state().point_vortices.iter().map(|&pv| pv.position));
+                                mbuf.extend(&time_stepper.state().passive_tracers);
                             }
                             progress.step(n == 0);
                         }

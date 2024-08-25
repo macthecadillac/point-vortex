@@ -6,17 +6,17 @@ mod error;
 mod ftle;
 mod poincare_section;
 mod kernel;
-mod trajectory;
+mod tracker;
 mod utils;
 
 #[derive(Debug, Subcommand)]
 enum Subcmd {
     /// Track trajectory of point vortices and passive tracers
-    Trajectory(trajectory::Parameters),
+    Track(tracker::Parameters),
     /// Compute finite time Lyapunov exponents
     FTLE(ftle::Parameters),
     /// Compute Poincare sections
-    Poincare(poincare_section::Parameters)
+    RealSpacePoincare(poincare_section::Parameters)
 }
 
 #[derive(Parser, Debug)]
@@ -29,9 +29,9 @@ struct Args {
 fn main() -> Result<(), MainError> {
     let args = Args::parse();
     match args.command {
-        Subcmd::Trajectory(t) => t.run()?,
+        Subcmd::Track(t) => t.run()?,
         Subcmd::FTLE(f) => f.run()?,
-        Subcmd::Poincare(p) => p.run()?,
+        Subcmd::RealSpacePoincare(p) => p.run()?,
     }
     Ok(())
 }

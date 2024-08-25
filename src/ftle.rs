@@ -11,25 +11,25 @@ use std::io;
 use std::path::PathBuf;
 
 use crate::kernel;
-use crate::kernel::{PointVortex, Problem, Vector};
+use crate::kernel::{PointVortex, Specification, Vector};
 
 use main_error::MainError;
 
 #[derive(Deserialize)]
 #[derive(Clone)]
-pub struct P {
-    pub sqg: bool,
-    pub rossby: f64,
-    pub t: f64,
-    pub time_step: f64,
-    pub delta: f64,
-    pub point_vortices: Vec<PointVortex>,
+struct SimulationSpecification {
+    sqg: bool,
+    rossby: f64,
+    t: f64,
+    time_step: f64,
+    delta: f64,
+    point_vortices: Vec<PointVortex>,
     #[serde(deserialize_with = "crate::config::deserialize_grid")]
-    pub grid_points: Vec<Vector>
+    grid_points: Vec<Vector>
 }
 
-impl P {
-    pub(crate) fn add_delta_tracers(&self) -> Self {
+impl SimulationSpecification {
+    fn add_delta_tracers(&self) -> Self {
         let mut grid_points = vec![];
         for &v in self.grid_points.iter() {
             grid_points.push(Vector { x: v.x + self.delta, ..v });
@@ -43,7 +43,7 @@ impl P {
     }
 }
 
-impl Problem for P {
+impl Specification for SimulationSpecification {
     fn sqg(&self) -> bool { self.sqg }
     fn rossby(&self) -> f64 { self.rossby }
     fn time_step(&self) -> f64 { self.time_step }
@@ -67,16 +67,16 @@ struct FiniteTimeLyapunovExponent {
     tmax: f64,
     delta_t: f64,
     delta: f64,
-    time_stepper: kernel::Solver
+    time_stepper: kernel::TimeStepper
 }
 
 impl FiniteTimeLyapunovExponent {
-    fn new(problem: &P) -> Self {
+    fn new(spec: &SimulationSpecification) -> Self {
         let t = 0.;
-        let tmax = problem.t;
-        let delta_t = problem.time_step;
-        let delta = problem.delta;
-        let time_stepper = kernel::Solver::new(problem);
+        let tmax = spec.t;
+        let delta_t = spec.time_step;
+        let delta = spec.delta;
+        let time_stepper = kernel::TimeStepper::new(spec);
         Self { t, tmax, delta_t, delta, time_stepper }
     }
 
@@ -121,20 +121,20 @@ impl FiniteTimeLyapunovExponent {
 }
 
 #[derive(Parser, Debug)]
-pub(crate) struct Parameters {
+pub struct Parameters {
     /// Path to configuration file
-    pub(crate) config: PathBuf,
+    pub config: PathBuf,
     #[arg(long)]
     /// Do not write output to disk
-    pub(crate) nosave: bool,
+    pub nosave: bool,
 }
 
 impl Parameters {
-    pub(crate) fn run(self) -> Result<(), MainError> {
+    pub fn run(self) -> Result<(), MainError> {
         let config_path = self.config;
-        let problem = P::parse(&config_path)?;
-        let npt = problem.grid_points.len();
-        let problem_w_delta = problem.add_delta_tracers();
+        let spec = SimulationSpecification::parse(&config_path)?;
+        let npt = spec.grid_points.len();
+        let spec_w_delta = spec.add_delta_tracers();
         let start_time = Local::now();
         println!("Run started at {}", start_time.format("%m-%d-%Y %H:%M:%S"));
 
@@ -149,7 +149,7 @@ impl Parameters {
                 .writer(b).begin_nd())
             .transpose()? {
 
-            let mut solvers: Vec<_> = problem_w_delta.divide(npt)
+            let mut solvers: Vec<_> = spec_w_delta.divide(npt)
                 .iter()
                 .map(FiniteTimeLyapunovExponent::new)
                 .collect();

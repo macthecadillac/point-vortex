@@ -1,7 +1,13 @@
 use chrono::{DateTime, Local};
+use main_error::MainError;
+use npyz::{npz::NpzWriter, WriterBuilder};
 
+use std::fs::File;
 use std::io;
 use std::io::prelude::*;
+use std::io::BufWriter;
+use std::path::Path;
+
 
 #[derive(Clone, Copy)]
 pub struct Progress {
@@ -40,3 +46,28 @@ impl Progress {
         self.step += 1;
     }
 }
+
+pub struct Writer {
+    file_handle: NpzWriter<BufWriter<File>>
+}
+
+impl Writer {
+    pub fn new(path: impl AsRef<Path>) -> Result<Self, MainError> {
+        let file_handle = npyz::npz::NpzWriter::create(path)?;
+        Ok(Writer { file_handle })
+    }
+
+    pub fn writez<T, U>(&mut self, label: &str, dim: &[u64], data: T)
+        -> Result<(), MainError>
+        where T: IntoIterator<Item=U>,
+              U: npyz::AutoSerialize + npyz::Serialize {
+        let mut writer = self.file_handle.array(label, Default::default())?
+            .default_dtype()
+            .shape(dim)
+            .begin_nd()?;
+        writer.extend(data.into_iter())?;
+        writer.finish()?;
+        Ok(())
+    }
+}
+
