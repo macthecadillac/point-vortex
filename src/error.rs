@@ -17,6 +17,10 @@ pub(crate) enum Error {
     InvertedRange(f64, f64),
     #[error(display = "Empty range. Note that n must be greater than or equal to 2.")]
     EmptyRange,
+    #[error(display = "Lengths of 1., {} and {} do not satisfy the triangle inequality.", _0, _1)]
+    TriangleInequalityError(f64, f64),
+    #[error(display = "Unable to distinguish braid order. Change time step to mitigate problem.")]
+    UnableToDistinguishBraidOrder,
     #[error(display = "")]
     TimeError(#[source] std::time::SystemTimeError),
 }

@@ -10,6 +10,7 @@ use std::io::BufWriter;
 use std::path::PathBuf;
 use std::slice;
 
+use crate::config::Parse;
 use crate::error;
 use crate::kernel;
 use crate::kernel::{PointVortex, Specification, Vector};
@@ -36,6 +37,8 @@ impl Specification for SimulationSpecification {
     fn passive_tracers(&self) -> &[Vector] { &self.passive_tracers }
     fn replace_tracers(&self, tracers: &[Vector]) -> Self { Self { passive_tracers: tracers.to_owned(), ..self.clone() } }
 }
+
+impl Parse for SimulationSpecification {}
 
 struct MultiBufferData<'a, T> {
     npv: usize,

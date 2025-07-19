@@ -16,6 +16,43 @@ use crate::kernel::{PointVortex, Specification, Vector};
 
 use main_error::MainError;
 
+struct BraidCalculator {
+    prev_tracer_state: Vec<Vector>,
+    projected_positions: Vec<f64>,
+    braid: Vec<usize>,
+    angle: f64
+}
+
+impl BraidCalculator {
+    fn project(&mut self) {
+        self.projected_positions.clear();
+        let iter = self.prev_tracer_state.iter()
+            .map(|v| v.x * self.angle.cos() + v.y * self.angle.sin());
+        self.projected_positions.extend(iter);
+    }
+
+    fn find_braid_generator(&mut self) -> Result<(), MainError> {
+        let iter1 = self.projected_positions.iter();
+        let iter2 = self.projected_positions.iter().skip(1);
+        let mut iter = iter1.zip(iter2).enumerate();
+        for (n, (&pos1, &pos2)) in iter.by_ref() {
+            if pos1 > pos2 {
+                self.braid.push(n + 1);
+                break
+            }
+        }
+        if !iter.all(|(_, (pos1, pos2))| pos1 <= pos2) {
+            Err(crate::error::Error::UnableToDistinguishBraidOrder)?;
+        }
+        Ok(())
+    }
+
+    fn braid_length
+
+    //fn ftbe(&self) -> f64 {
+    //}
+}
+
 #[derive(Deserialize)]
 #[derive(Clone)]
 struct SimulationSpecification {
@@ -32,16 +69,13 @@ struct SimulationSpecification {
 impl SimulationSpecification {
     fn add_delta_tracers(&self) -> Self {
         let mut grid_points = vec![];
-        let not_z = self.sqg && self.grid_points.iter().all(|v| v.z.abs() < 1e-10);
         for &v in self.grid_points.iter() {
             grid_points.push(Vector { x: v.x + self.delta, ..v });
             grid_points.push(Vector { x: v.x - self.delta, ..v });
             grid_points.push(Vector { y: v.y + self.delta, ..v });
             grid_points.push(Vector { y: v.y - self.delta, ..v });
-            if not_z {
-                grid_points.push(Vector { z: v.z + self.delta, ..v });
-                grid_points.push(Vector { z: v.z - self.delta, ..v });
-            }
+            grid_points.push(Vector { z: v.z + self.delta, ..v });
+            grid_points.push(Vector { z: v.z - self.delta, ..v });
         }
         Self { grid_points, ..self.clone() }
     }
@@ -86,43 +120,24 @@ impl FiniteTimeLyapunovExponent {
         Self { t, tmax, delta_t, delta, time_stepper }
     }
 
-    fn grid_point(&self, xs: &[Vector]) -> f64 {
+    fn grid_point(delta: f64, t: f64, xs: &[Vector]) -> f64 {
         // Compute Jacobian
-        let a = 0.5 / self.delta;
-        macro_rules! j_to_max_e {
-            ($j: expr) => {
-                {
-                    let cauchy_green = $j * $j.transpose();  // nalgebra does dot product this way
-                    let eigs = cauchy_green.complex_eigenvalues();
-                    let max_e = eigs.into_iter().max_by(|&a, &b| a.re.partial_cmp(&b.re).unwrap());
-                    max_e.unwrap().re.ln() / self.t
-                }
-            }
-        }
-        match xs.len() {
-            4 => {
-                let j00 = a * (xs[1].x - xs[0].x);
-                let j01 = a * (xs[1].y - xs[0].y);
-                let j10 = a * (xs[3].x - xs[2].x);
-                let j11 = a * (xs[3].y - xs[2].y);
-                let j = matrix![j00, j01; j10, j11];
-                j_to_max_e!(j)
-            },
-            9 => {
-                let j00 = a * (xs[1].x - xs[0].x);
-                let j01 = a * (xs[1].y - xs[0].y);
-                let j02 = a * (xs[1].z - xs[0].z);
-                let j10 = a * (xs[3].x - xs[2].x);
-                let j11 = a * (xs[3].y - xs[2].y);
-                let j12 = a * (xs[3].z - xs[2].z);
-                let j20 = a * (xs[5].x - xs[4].x);
-                let j21 = a * (xs[5].y - xs[4].y);
-                let j22 = a * (xs[5].z - xs[4].z);
-                let j = matrix![j00, j01, j02; j10, j11, j12; j20, j21, j22];
-                j_to_max_e!(j)
-            },
-            _ => panic!("Unexpected slice length")
-        }
+        let a = 0.5 / delta;
+        let j00 = a * (xs[1].x - xs[0].x);
+        let j01 = a * (xs[1].y - xs[0].y);
+        let j02 = a * (xs[1].z - xs[0].z);
+        let j10 = a * (xs[3].x - xs[2].x);
+        let j11 = a * (xs[3].y - xs[2].y);
+        let j12 = a * (xs[3].z - xs[2].z);
+        let j20 = a * (xs[5].x - xs[4].x);
+        let j21 = a * (xs[5].y - xs[4].y);
+        let j22 = a * (xs[5].z - xs[4].z);
+        let j = matrix![j00, j01, j02; j10, j11, j12; j20, j21, j22];
+        let cauchy_green = j * j.transpose();  // nalgebra does dot product this way
+        let eigs = cauchy_green.complex_eigenvalues();
+        let max_e = eigs.into_iter().max_by(|&a, &b| a.re.partial_cmp(&b.re).unwrap());
+        let res = max_e.unwrap().re.ln() / t;
+        res
     }
 
     fn step(&mut self) {
@@ -134,8 +149,11 @@ impl FiniteTimeLyapunovExponent {
         loop {
             self.step();
             if self.t >= self.tmax {
-                let tracers = &self.time_stepper.state().passive_tracers;
-                let ftle = self.grid_point(tracers);
+                let ftle = FiniteTimeLyapunovExponent::grid_point(
+                    self.delta,
+                    self.t,
+                    &self.time_stepper.state().passive_tracers
+                );
                 break Ok(ftle)
             }
         }

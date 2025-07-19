@@ -3,8 +3,11 @@ use main_error::MainError;
 
 mod config;
 mod error;
+mod excursion;
 mod ftle;
-mod poincare_section;
+mod rsps;
+mod triangle_ps;
+mod triangle_side_lengths;
 mod kernel;
 mod tracker;
 mod utils;
@@ -15,8 +18,14 @@ enum Subcmd {
     Track(tracker::Parameters),
     /// Compute finite time Lyapunov exponents
     FTLE(ftle::Parameters),
-    /// Compute Poincare sections
-    RealSpacePoincare(poincare_section::Parameters)
+    /// Compute Poincare sections in real space
+    RealSpacePoincareSection(rsps::Parameters),
+    /// Compute Poincare sections in real space
+    TrianglePoincareSection(triangle_ps::Parameters),
+    /// Track triangle side lengths
+    TriangleSideLengths(triangle_side_lengths::Parameters),
+    /// Find the amount of vertical movement of tracers started at a given position
+    VerticalExcursion(excursion::Parameters)
 }
 
 #[derive(Parser, Debug)]
@@ -31,7 +40,10 @@ fn main() -> Result<(), MainError> {
     match args.command {
         Subcmd::Track(t) => t.run()?,
         Subcmd::FTLE(f) => f.run()?,
-        Subcmd::RealSpacePoincare(p) => p.run()?,
+        Subcmd::RealSpacePoincareSection(p) => p.run()?,
+        Subcmd::TrianglePoincareSection(p) => p.run()?,
+        Subcmd::TriangleSideLengths(p) => p.run()?,
+        Subcmd::VerticalExcursion(p) => p.run()?
     }
     Ok(())
 }

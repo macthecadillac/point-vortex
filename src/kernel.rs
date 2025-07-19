@@ -1,12 +1,7 @@
-use serde::de::DeserializeOwned;
-
 use std::f64::consts::FRAC_1_PI;
-use std::fs::File;
-use std::io::prelude::*;
-use std::path::Path;
 use std::ops::Mul;
 
-pub trait Specification: Clone + Sized + DeserializeOwned {
+pub trait Specification: Clone {
     fn sqg(&self) -> bool;
     fn rossby(&self) -> f64;
     fn time_step(&self) -> f64;
@@ -20,14 +15,6 @@ pub trait Specification: Clone + Sized + DeserializeOwned {
           .map(|chunk| self.replace_tracers(chunk))
           .collect()
     }
-    fn parse(path: &Path) -> Result<Self, crate::error::Error> {
-        let mut file = File::open(&path)?;
-        let mut toml_file = String::new();
-        file.read_to_string(&mut toml_file)?;
-
-        let config = toml::from_str(&toml_file)?;
-        Ok(config)
-    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -35,7 +22,7 @@ pub trait Specification: Clone + Sized + DeserializeOwned {
 #[derive(npyz::AutoSerialize, npyz::Serialize)]
 #[derive(derive_more::Add, derive_more::Sub, derive_more::Sum)]
 #[derive(derive_more::Div)]
-pub struct Vector { pub(crate) x: f64, pub(crate) y: f64, pub(crate) z: f64 }
+pub struct Vector { pub x: f64, pub y: f64, pub z: f64 }
 
 impl Mul<Vector> for f64 {
     type Output = Vector;
@@ -45,11 +32,11 @@ impl Mul<Vector> for f64 {
 }
 
 impl Vector {
-    fn norm_sq(self) -> f64 {
+    pub fn norm_sq(self) -> f64 {
         self.x * self.x + self.y * self.y + self.z * self.z
     }
 
-    fn norm_pow(self, pow: f64) -> f64 {
+    pub fn norm_pow(self, pow: f64) -> f64 {
         self.norm_sq().powf(0.5 * pow)
     }
 }
@@ -82,7 +69,7 @@ pub struct TimeStepper {
 }
 
 impl TimeStepper {
-    pub fn new(problem: &impl Specification) -> Self {
+    pub fn new<T>(problem: &T) -> Self where T: Specification {
         let rossby = problem.rossby();
         let dt = problem.time_step();
         let sqg = problem.sqg();
@@ -206,19 +193,23 @@ fn ui(vtx: Vector, other_vtxs: &[PointVortex], rossby: f64, sqg: bool) -> Vector
         .iter()
         .map(|&pv| pv.strength * u0ij(vtx, pv.position, sqg))
         .sum();
-    let u1s: Vector = other_vtxs
-        .iter()
-        .map(|&pv| pv.strength * pv.strength * u1sij(vtx, pv.position, sqg))
-        .sum();
-    let nvtxs = other_vtxs.len();
-    let u1p: Vector = other_vtxs[..nvtxs - 1].iter().enumerate().map(|(i, pv1)| {
-            other_vtxs[i + 1..].iter().map(|pv2| {
-                let &PointVortex { strength: gamma1, position: vtx1 } = pv1;
-                let &PointVortex { strength: gamma2, position: vtx2 } = pv2;
-                gamma1 * gamma2 * u1pijk(vtx, vtx1, vtx2, sqg)
+    if rossby.abs() < 1e-16 {
+        u0
+    } else {
+        let u1s: Vector = other_vtxs
+            .iter()
+            .map(|&pv| pv.strength * pv.strength * u1sij(vtx, pv.position, sqg))
+            .sum();
+        let nvtxs = other_vtxs.len();
+        let u1p: Vector = other_vtxs[..nvtxs - 1].iter().enumerate().map(|(i, pv1)| {
+                other_vtxs[i + 1..].iter().map(|pv2| {
+                    let &PointVortex { strength: gamma1, position: vtx1 } = pv1;
+                    let &PointVortex { strength: gamma2, position: vtx2 } = pv2;
+                    gamma1 * gamma2 * u1pijk(vtx, vtx1, vtx2, sqg)
+                })
             })
-        })
-        .flatten()
-        .sum();
-    u0 + rossby * (u1s + u1p)
+            .flatten()
+            .sum();
+        u0 + rossby * (u1s + u1p)
+    }
 }
